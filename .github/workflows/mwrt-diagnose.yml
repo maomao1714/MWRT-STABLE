@@ -12,7 +12,7 @@ options:
 - re-sp-01b
 default: wh3000pro
 
-  kernel:
+kernel:
     description: "选择内核"
     required: true
     type: choice
