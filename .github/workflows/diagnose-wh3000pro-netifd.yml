@@ -1,4 +1,4 @@
-name: "🔎 NETIFD 最终打包诊断 v3"
+name: "🔬 NETIFD 最终打包诊断 v4"
 
 on:
   workflow_dispatch:
@@ -14,59 +14,56 @@ env:
 
 jobs:
   diagnose:
-    name: "🔎 WH3000 Pro NETIFD 打包链诊断"
+    name: "🔬 WH3000 Pro NETIFD IPK 实测"
     runs-on: ubuntu-22.04
 
     steps:
 
       # ==========================================================
-      # 1. Checkout MWRT-STABLE
+      # 1. Checkout
       # ==========================================================
       - name: "📥 Checkout MWRT-STABLE"
         uses: actions/checkout@v4
 
       # ==========================================================
-      # 2. Runner 基础信息
+      # 2. Runner 状态
       # ==========================================================
       - name: "🖥️ Runner 状态"
         shell: bash
         run: |
           set -Eeuo pipefail
 
-          echo "=========================================="
-          echo "🖥️ Runner 状态"
-          echo "=========================================="
+          echo "============================================================"
+          echo "🖥️ RUNNER 状态"
+          echo "============================================================"
 
-          uname -a
           echo
-
           echo "CPU:"
           nproc
-          echo
 
+          echo
           echo "内存:"
           free -h
-          echo
 
+          echo
           echo "磁盘:"
           df -h
-          echo
 
-          echo "工作目录:"
-          pwd
-          ls -lah
+          echo
+          echo "系统:"
+          uname -a
 
       # ==========================================================
-      # 3. 克隆 LEDE
+      # 3. Clone LEDE
       # ==========================================================
       - name: "📦 克隆 LEDE"
         shell: bash
         run: |
           set -Eeuo pipefail
 
-          echo "=========================================="
+          echo "============================================================"
           echo "📦 克隆 LEDE"
-          echo "=========================================="
+          echo "============================================================"
 
           git clone \
             --depth=1 \
@@ -80,45 +77,8 @@ jobs:
           echo "LEDE commit:"
           git log -1 --oneline
 
-          echo
-          echo "LEDE branch:"
-          git branch --show-current
-
       # ==========================================================
-      # 4. 检查配置文件
-      # ==========================================================
-      - name: "📋 检查 WH3000 Pro 配置"
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-
-          echo "=========================================="
-          echo "📋 检查 WH3000 Pro 配置"
-          echo "=========================================="
-
-          test -f "${CONFIG_FILE}"
-
-          echo "配置文件：${CONFIG_FILE}"
-          echo
-
-          grep -E \
-            '^CONFIG_TARGET_mediatek=|^CONFIG_TARGET_mediatek_filogic=|^CONFIG_TARGET_mediatek_filogic_DEVICE_huasifei_wh3000-pro=' \
-            "${CONFIG_FILE}" || true
-
-          echo
-          echo "NETIFD:"
-          grep -E \
-            '^CONFIG_PACKAGE_netifd=' \
-            "${CONFIG_FILE}" || true
-
-          echo
-          echo "Wi-Fi:"
-          grep -E \
-            '^CONFIG_PACKAGE_(wifi-scripts|kmod-mac80211|kmod-cfg80211|kmod-mt76-core|kmod-mt76-connac|kmod-mt7915e|iwinfo|rpcd-mod-iwinfo)=' \
-            "${CONFIG_FILE}" || true
-
-      # ==========================================================
-      # 5. 加载配置
+      # 4. 加载配置
       # ==========================================================
       - name: "⚙️ 加载 WH3000 Pro 配置"
         shell: bash
@@ -127,29 +87,38 @@ jobs:
 
           cd "${LEDE_DIR}"
 
+          test -f "../${CONFIG_FILE}"
+
           cp "../${CONFIG_FILE}" .config
 
-          echo "=========================================="
-          echo "⚙️ 当前 .config"
-          echo "=========================================="
+          echo "============================================================"
+          echo "⚙️ WH3000 Pro 配置"
+          echo "============================================================"
+
+          grep -E \
+            '^CONFIG_TARGET_mediatek=|^CONFIG_TARGET_mediatek_filogic=|^CONFIG_TARGET_mediatek_filogic_DEVICE_huasifei_wh3000-pro=' \
+            .config || true
+
+          echo
+          echo "NETIFD / Wi-Fi:"
 
           grep -E \
             '^CONFIG_PACKAGE_(netifd|wifi-scripts|kmod-mac80211|kmod-cfg80211|kmod-mt76-core|kmod-mt76-connac|kmod-mt7915e|iwinfo|rpcd-mod-iwinfo)=' \
             .config || true
 
       # ==========================================================
-      # 6. 安全更新 feeds
+      # 5. 安全 feeds
       # ==========================================================
-      - name: "📡 安全更新并安装 feeds"
+      - name: "📡 安全更新 feeds"
         shell: bash
         run: |
           set -Eeuo pipefail
 
           cd "${LEDE_DIR}"
 
-          echo "=========================================="
-          echo "📡 安全更新并安装 feeds"
-          echo "=========================================="
+          echo "============================================================"
+          echo "📡 安全更新 feeds"
+          echo "============================================================"
 
           cp .config .config.device
           rm -f .config
@@ -165,66 +134,66 @@ jobs:
           mv .config.device .config
 
           echo
-          echo "===== feeds 后配置 ====="
+          echo "feeds 完成后配置:"
 
           grep -E \
-            '^CONFIG_PACKAGE_(netifd|wifi-scripts|luci-theme-design|docker|dockerd|lucky|qmodem|luci-app-qmodem-next)=' \
+            '^CONFIG_PACKAGE_(netifd|wifi-scripts|kmod-mac80211|kmod-cfg80211|kmod-mt76-core|kmod-mt76-connac|kmod-mt7915e)=' \
             .config || true
 
       # ==========================================================
-      # 7. 检查 Makefile
+      # 6. defconfig
       # ==========================================================
-      - name: "🔬 检查 NETIFD / WIFI-SCRIPTS Makefile"
+      - name: "⚙️ make defconfig"
         shell: bash
         run: |
           set -Eeuo pipefail
 
           cd "${LEDE_DIR}"
 
-          echo "=========================================="
-          echo "🔬 NETIFD Makefile"
-          echo "=========================================="
-
-          sed -n '1,180p' \
-            package/network/config/netifd/Makefile
-
-          echo
-          echo "=========================================="
-          echo "🔬 WIFI-SCRIPTS Makefile"
-          echo "=========================================="
-
-          if [ -f package/network/config/wifi-scripts/Makefile ]; then
-            sed -n '1,220p' \
-              package/network/config/wifi-scripts/Makefile
-          else
-            echo "⚠️ 当前源码没有 wifi-scripts Makefile"
-          fi
-
-      # ==========================================================
-      # 8. make defconfig
-      # ==========================================================
-      - name: "⚙️ 执行 make defconfig"
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-
-          cd "${LEDE_DIR}"
-
-          echo "=========================================="
+          echo "============================================================"
           echo "⚙️ make defconfig"
-          echo "=========================================="
+          echo "============================================================"
 
           make defconfig
 
           echo
-          echo "===== defconfig 后 ====="
+          echo "defconfig 后:"
 
           grep -E \
             '^CONFIG_PACKAGE_(netifd|wifi-scripts|kmod-mac80211|kmod-cfg80211|kmod-mt76-core|kmod-mt76-connac|kmod-mt7915e|iwinfo|rpcd-mod-iwinfo)=' \
             .config || true
 
       # ==========================================================
-      # 9. NETIFD prepare
+      # 7. 检查 netifd Makefile
+      # ==========================================================
+      - name: "🔎 检查 NETIFD Makefile"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          cd "${LEDE_DIR}"
+
+          echo "============================================================"
+          echo "🔎 NETIFD Makefile"
+          echo "============================================================"
+
+          grep -n \
+            -C 12 \
+            'netifd-wireless.sh' \
+            package/network/config/netifd/Makefile \
+            || true
+
+          echo
+          echo "完整 install 区域:"
+
+          grep -n \
+            -A 45 \
+            '^define Package/netifd/install' \
+            package/network/config/netifd/Makefile \
+            || true
+
+      # ==========================================================
+      # 8. NETIFD prepare
       # ==========================================================
       - name: "📦 NETIFD prepare"
         shell: bash
@@ -233,120 +202,73 @@ jobs:
 
           cd "${LEDE_DIR}"
 
-          echo "=========================================="
+          echo "============================================================"
           echo "📦 NETIFD prepare"
-          echo "=========================================="
+          echo "============================================================"
 
           make package/network/config/netifd/prepare V=s
 
           echo
-          echo "===== 查找 netifd-wireless.sh ====="
+          echo "查找 netifd-wireless.sh:"
 
           find build_dir \
             -type f \
             -name "netifd-wireless.sh" \
-            -print 2>/dev/null || true
+            -print \
+            2>/dev/null \
+            || true
 
       # ==========================================================
-      # 10. 检查 prepare 后脚本
+      # 9. 记录 NETIFD 源码目录
       # ==========================================================
-      - name: "🔎 检查 NETIFD 脚本"
+      - name: "📌 记录 NETIFD 源码"
         shell: bash
         run: |
           set -Eeuo pipefail
 
           cd "${LEDE_DIR}"
 
-          echo "=========================================="
-          echo "🔎 NETIFD 脚本"
-          echo "=========================================="
-
-          NETIFD_SCRIPT="$(
+          NETIFD_DIR="$(
             find build_dir \
-              -type f \
-              -path "*/netifd-*/scripts/netifd-wireless.sh" \
+              -maxdepth 3 \
+              -type d \
+              -name 'netifd-*' \
               -print \
-              2>/dev/null | head -n 1
+              2>/dev/null \
+              | head -n 1
           )"
 
-          if [ -z "${NETIFD_SCRIPT}" ]; then
-            echo "❌ 找不到 netifd-wireless.sh"
+          if [ -z "${NETIFD_DIR}" ]; then
+            echo "❌ 找不到 NETIFD 源码目录"
             exit 1
           fi
 
-          echo "找到："
-          echo "${NETIFD_SCRIPT}"
+          echo "NETIFD_DIR=${NETIFD_DIR}" \
+            >> "${GITHUB_ENV}"
+
+          echo "NETIFD_DIR=${NETIFD_DIR}"
 
           echo
-          echo "文件信息:"
-          ls -lh "${NETIFD_SCRIPT}"
+          echo "脚本:"
 
-          echo
-          echo "SHA256:"
-          sha256sum "${NETIFD_SCRIPT}"
-
-          echo
-          echo "前 30 行:"
-          sed -n '1,30p' "${NETIFD_SCRIPT}"
-
-          echo
-          echo "=========================================="
-          echo "📌 netifd Makefile 安装规则"
-          echo "=========================================="
-
-          grep -n -C 8 \
-            'netifd-wireless.sh' \
-            package/network/config/netifd/Makefile || true
+          ls -lh \
+            "${NETIFD_DIR}/scripts/" \
+            2>/dev/null \
+            || true
 
       # ==========================================================
-      # 11. 检查 mac80211 是否调用该文件
+      # 10. 检查 toolchain
       # ==========================================================
-      - name: "📡 检查 mac80211 依赖"
+      - name: "🧰 检查 Toolchain"
         shell: bash
         run: |
           set -Eeuo pipefail
 
           cd "${LEDE_DIR}"
 
-          echo "=========================================="
-          echo "📡 检查 mac80211.sh"
-          echo "=========================================="
-
-          MAC80211_FILES="$(
-            find package \
-              -type f \
-              -path "*/lib/netifd/wireless/mac80211.sh" \
-              -print \
-              2>/dev/null || true
-          )"
-
-          echo "${MAC80211_FILES}"
-
-          while IFS= read -r file; do
-            [ -z "${file}" ] && continue
-
-            echo
-            echo "----- ${file} -----"
-
-            grep -n \
-              'netifd-wireless.sh' \
-              "${file}" || true
-
-          done <<< "${MAC80211_FILES}"
-
-      # ==========================================================
-      # 12. 判断工具链是否已经存在
-      # ==========================================================
-      - name: "🧰 检查工具链状态"
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-
-          cd "${LEDE_DIR}"
-
-          echo "=========================================="
-          echo "🧰 工具链状态"
-          echo "=========================================="
+          echo "============================================================"
+          echo "🧰 TOOLCHAIN 检查"
+          echo "============================================================"
 
           TOOLCHAIN_DIR="$(
             find staging_dir \
@@ -354,101 +276,66 @@ jobs:
               -type d \
               -name 'toolchain-*' \
               -print \
-              2>/dev/null | head -n 1
+              2>/dev/null \
+              | head -n 1
           )"
 
           if [ -z "${TOOLCHAIN_DIR}" ]; then
             echo "TOOLCHAIN_READY=no"
-            echo "⚠️ 当前 Runner 没有已经准备好的 toolchain"
-          else
-            echo "TOOLCHAIN_READY=yes"
-            echo "工具链目录：${TOOLCHAIN_DIR}"
-
-            if compgen -G "${TOOLCHAIN_DIR}/lib/ld-musl-*.so*" > /dev/null; then
-              echo "动态链接器存在"
-            else
-              echo "⚠️ 动态链接器缺失"
-            fi
+            echo "⚠️ 没有找到 toolchain"
+            exit 0
           fi
 
-      # ==========================================================
-      # 13. 只做 Makefile install 规则模拟
-      # ==========================================================
-      - name: "🧪 模拟 NETIFD 安装路径"
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-
-          cd "${LEDE_DIR}"
-
-          echo "=========================================="
-          echo "🧪 模拟 NETIFD 安装路径"
-          echo "=========================================="
-
-          NETIFD_SCRIPT="$(
-            find build_dir \
-              -type f \
-              -path "*/netifd-*/scripts/netifd-wireless.sh" \
-              -print \
-              2>/dev/null | head -n 1
-          )"
-
-          if [ -z "${NETIFD_SCRIPT}" ]; then
-            echo "❌ 没有找到 netifd-wireless.sh"
-            exit 1
-          fi
-
-          TEST_ROOT="${PWD}/tmp-netifd-install"
-          rm -rf "${TEST_ROOT}"
-
-          mkdir -p "${TEST_ROOT}/lib/netifd"
-
-          cp "${NETIFD_SCRIPT}" \
-            "${TEST_ROOT}/lib/netifd/netifd-wireless.sh"
-
-          chmod 0755 \
-            "${TEST_ROOT}/lib/netifd/netifd-wireless.sh"
+          echo "TOOLCHAIN_DIR=${TOOLCHAIN_DIR}"
 
           echo
-          echo "模拟安装结果："
+          echo "目录:"
+          ls -lah "${TOOLCHAIN_DIR}" | head -n 80
 
-          find "${TEST_ROOT}" \
+          echo
+          echo "动态链接器:"
+          find "${TOOLCHAIN_DIR}" \
             -type f \
-            -ls
+            \( \
+              -name 'ld-musl-*.so*' \
+              -o \
+              -name 'libc.so*' \
+            \) \
+            -print \
+            2>/dev/null \
+            | head -n 50 \
+            || true
 
-          echo
-          echo "文件："
-
-          ls -lh \
-            "${TEST_ROOT}/lib/netifd/netifd-wireless.sh"
-
-          echo
-          echo "SHA256："
-
-          sha256sum \
-            "${TEST_ROOT}/lib/netifd/netifd-wireless.sh"
+          if compgen -G "${TOOLCHAIN_DIR}/lib/ld-musl-*.so*" > /dev/null; then
+            echo
+            echo "TOOLCHAIN_DYNAMIC_LINKER=yes"
+          else
+            echo
+            echo "TOOLCHAIN_DYNAMIC_LINKER=no"
+          fi
 
       # ==========================================================
-      # 14. 检查当前是否已经存在 ipkg/pkgdir
+      # 11. 检查是否已经有 package 输出
       # ==========================================================
-      - name: "📦 检查已有 IPKG / PKGDIR"
+      - name: "📦 检查已有 NETIFD 输出"
         shell: bash
         run: |
           set -Eeuo pipefail
 
           cd "${LEDE_DIR}"
 
-          echo "=========================================="
-          echo "📦 查找 netifd package 输出"
-          echo "=========================================="
+          echo "============================================================"
+          echo "📦 已有 NETIFD 输出"
+          echo "============================================================"
 
           echo
-          echo "IPKG:"
+          echo "IPK:"
           find build_dir \
             -type f \
             -iname '*netifd*.ipk' \
             -print \
-            2>/dev/null || true
+            2>/dev/null \
+            || true
 
           echo
           echo "PKGDIR:"
@@ -456,126 +343,248 @@ jobs:
             -type f \
             -path '*/ipkg-*/*/lib/netifd/netifd-wireless.sh' \
             -print \
-            2>/dev/null || true
+            2>/dev/null \
+            || true
+
+      # ==========================================================
+      # 12. 实际构建 NETIFD package
+      # ==========================================================
+      - name: "🚧 实际构建 NETIFD IPK"
+        id: build_netifd
+        shell: bash
+        continue-on-error: true
+        run: |
+          set -Eeuo pipefail
+
+          cd "${LEDE_DIR}"
+
+          echo "============================================================"
+          echo "🚧 开始实际构建 NETIFD IPK"
+          echo "============================================================"
 
           echo
-          echo "所有 netifd-wireless.sh:"
-          find build_dir \
-            -type f \
-            -name 'netifd-wireless.sh' \
-            -print \
-            2>/dev/null || true
+          echo "注意："
+          echo "这里只请求 NETIFD package。"
+          echo "如果 OpenWrt 依赖链要求工具链，则记录原因后继续诊断。"
+          echo
+
+          make package/network/config/netifd/compile V=s
 
       # ==========================================================
-      # 15. 如果已有 IPK，直接解包检查
+      # 13. 构建结果
       # ==========================================================
-      - name: "📦 解包已有 NETIFD IPK"
+      - name: "📊 NETIFD 构建结果"
+        if: always()
         shell: bash
         run: |
           set -Eeuo pipefail
 
           cd "${LEDE_DIR}"
 
-          echo "=========================================="
-          echo "📦 解包 NETIFD IPK"
-          echo "=========================================="
+          echo "============================================================"
+          echo "📊 NETIFD 构建结果"
+          echo "============================================================"
+
+          echo
+          echo "IPK 文件:"
+
+          find build_dir \
+            -type f \
+            -iname '*netifd*.ipk' \
+            -print \
+            -exec ls -lh {} \; \
+            2>/dev/null \
+            || true
+
+          echo
+          echo "PKGDIR 文件:"
+
+          find build_dir \
+            -type f \
+            -path '*/ipkg-*/*/lib/netifd/netifd-wireless.sh' \
+            -print \
+            -exec ls -lh {} \; \
+            2>/dev/null \
+            || true
+
+          echo
+          echo "全部 netifd-wireless.sh:"
+
+          find build_dir \
+            -type f \
+            -name 'netifd-wireless.sh' \
+            -print \
+            2>/dev/null \
+            || true
+
+      # ==========================================================
+      # 14. 检查 PKGDIR 中的文件
+      # ==========================================================
+      - name: "🔬 检查 NETIFD PKGDIR"
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          cd "${LEDE_DIR}"
+
+          echo "============================================================"
+          echo "🔬 NETIFD PKGDIR"
+          echo "============================================================"
+
+          PKG_FILES="$(
+            find build_dir \
+              -type f \
+              -path '*/ipkg-*/*/lib/netifd/*' \
+              -print \
+              2>/dev/null \
+              || true
+          )"
+
+          if [ -z "${PKG_FILES}" ]; then
+            echo "⚠️ 没有发现 NETIFD PKGDIR 文件"
+          else
+            echo "${PKG_FILES}"
+
+            echo
+            echo "重点文件:"
+
+            while IFS= read -r file; do
+              [ -z "${file}" ] && continue
+
+              if [[ "${file}" == *"netifd-wireless.sh" ]]; then
+                echo
+                echo "🎯 FOUND:"
+                echo "${file}"
+                ls -lh "${file}"
+                sha256sum "${file}"
+              fi
+            done <<< "${PKG_FILES}"
+          fi
+
+      # ==========================================================
+      # 15. 解包 NETIFD IPK
+      # ==========================================================
+      - name: "📦 解包 NETIFD IPK"
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          cd "${LEDE_DIR}"
+
+          echo "============================================================"
+          echo "📦 NETIFD IPK 内容"
+          echo "============================================================"
 
           IPK="$(
             find build_dir \
               -type f \
               -iname '*netifd*.ipk' \
               -print \
-              2>/dev/null | head -n 1
+              2>/dev/null \
+              | head -n 1
           )"
 
           if [ -z "${IPK}" ]; then
-            echo "⚠️ 当前诊断没有现成 NETIFD IPK"
-            echo "这是正常的，因为本诊断没有强制启动完整工具链编译。"
+            echo "⚠️ 没有找到 NETIFD IPK"
             exit 0
           fi
 
-          echo "找到 IPK:"
+          echo "IPK:"
           echo "${IPK}"
+
+          echo
+          echo "文件信息:"
+          ls -lh "${IPK}"
 
           rm -rf tmp-netifd-ipk
           mkdir -p tmp-netifd-ipk
 
-          tar -xf "${IPK}" \
+          tar -xf \
+            "${IPK}" \
             -C tmp-netifd-ipk
 
           echo
-          echo "IPK 内容:"
+          echo "IPK 全部文件:"
+
           find tmp-netifd-ipk \
             -type f \
-            -print
+            -print \
+            | sort
 
           echo
-          echo "检查 netifd-wireless.sh:"
+          echo "============================================================"
+          echo "🎯 检查 netifd-wireless.sh"
+          echo "============================================================"
 
-          find tmp-netifd-ipk \
-            -type f \
-            -path '*/lib/netifd/netifd-wireless.sh' \
-            -ls \
-            2>/dev/null || true
-
-      # ==========================================================
-      # 16. 检查最终固件输出
-      # ==========================================================
-      - name: "💿 检查最终固件 RootFS"
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-
-          cd "${LEDE_DIR}"
-
-          echo "=========================================="
-          echo "💿 检查最终固件 RootFS"
-          echo "=========================================="
-
-          if [ -d bin/targets ]; then
-            echo "发现 bin/targets:"
-            find bin/targets \
-              -maxdepth 5 \
+          FOUND="$(
+            find tmp-netifd-ipk \
               -type f \
+              -path '*/lib/netifd/netifd-wireless.sh' \
               -print \
-              2>/dev/null || true
+              2>/dev/null \
+              || true
+          )"
+
+          if [ -n "${FOUND}" ]; then
+            echo "✅ IPK 中存在:"
+            echo "${FOUND}"
+
+            while IFS= read -r file; do
+              [ -z "${file}" ] && continue
+
+              ls -lh "${file}"
+              sha256sum "${file}"
+            done <<< "${FOUND}"
           else
-            echo "⚠️ 当前诊断没有生成最终固件"
-            echo "因此这里不会有 rootfs。"
+            echo "❌ IPK 中不存在:"
+            echo "/lib/netifd/netifd-wireless.sh"
           fi
 
       # ==========================================================
-      # 17. 全源码依赖关系
+      # 16. 检查 netifd package manifest
       # ==========================================================
-      - name: "🔗 全源码搜索 NETIFD-WIRELESS"
+      - name: "📜 检查 NETIFD Manifest"
+        if: always()
         shell: bash
         run: |
           set -Eeuo pipefail
 
           cd "${LEDE_DIR}"
 
-          echo "=========================================="
-          echo "🔗 全源码搜索 netifd-wireless.sh"
-          echo "=========================================="
+          echo "============================================================"
+          echo "📜 NETIFD Manifest"
+          echo "============================================================"
 
-          grep -R \
-            -n \
-            --exclude-dir=.git \
-            --exclude='*.o' \
-            --exclude='*.a' \
-            'netifd-wireless.sh' \
-            package \
-            target \
-            include \
-            scripts \
+          find bin \
+            -type f \
+            -iname '*netifd*.manifest' \
+            -print \
+            -exec sed -n '1,160p' {} \; \
             2>/dev/null \
-            | head -n 200 \
+            || true
+
+          echo
+          echo "Package metadata:"
+
+          find build_dir \
+            -type f \
+            \( \
+              -name '*.control' \
+              -o \
+              -name '*.list' \
+            \) \
+            -path '*netifd*' \
+            -print \
+            2>/dev/null \
+            | head -n 100 \
             || true
 
       # ==========================================================
-      # 18. 最终自动分析
+      # 17. 最终自动判断
       # ==========================================================
-      - name: "🧠 自动分析诊断结果"
+      - name: "🧠 最终自动判断"
         if: always()
         shell: bash
         run: |
@@ -585,78 +594,89 @@ jobs:
 
           echo
           echo "============================================================"
-          echo "🧠 NETIFD 最终诊断结论"
+          echo "🧠 NETIFD v4 最终判断"
           echo "============================================================"
-
-          echo
-          echo "【1】配置："
-          grep -E \
-            '^CONFIG_PACKAGE_(netifd|wifi-scripts)=' \
-            .config \
-            || true
-
-          echo
-          echo "【2】源码："
 
           SCRIPT_COUNT="$(
             find build_dir \
               -type f \
               -name 'netifd-wireless.sh' \
-              2>/dev/null | wc -l
+              2>/dev/null \
+              | wc -l
           )"
 
-          echo "netifd-wireless.sh 数量：${SCRIPT_COUNT}"
-
-          echo
-          echo "【3】IPK："
+          PKG_SCRIPT_COUNT="$(
+            find build_dir \
+              -type f \
+              -path '*/ipkg-*/*/lib/netifd/netifd-wireless.sh' \
+              2>/dev/null \
+              | wc -l
+          )"
 
           IPK_COUNT="$(
             find build_dir \
               -type f \
               -iname '*netifd*.ipk' \
-              2>/dev/null | wc -l
+              2>/dev/null \
+              | wc -l
           )"
 
-          echo "NETIFD IPK 数量：${IPK_COUNT}"
-
-          echo
-          echo "【4】PKGDIR："
-
-          PKG_COUNT="$(
-            find build_dir \
-              -type f \
-              -path '*/ipkg-*/*/lib/netifd/netifd-wireless.sh' \
-              2>/dev/null | wc -l
+          IPK_SCRIPT_COUNT="$(
+            if [ -d tmp-netifd-ipk ]; then
+              find tmp-netifd-ipk \
+                -type f \
+                -path '*/lib/netifd/netifd-wireless.sh' \
+                2>/dev/null \
+                | wc -l
+            else
+              echo 0
+            fi
           )"
 
-          echo "PKGDIR 中 netifd-wireless.sh：${PKG_COUNT}"
+          echo
+          echo "源码 netifd-wireless.sh：${SCRIPT_COUNT}"
+          echo "PKGDIR netifd-wireless.sh：${PKG_SCRIPT_COUNT}"
+          echo "NETIFD IPK：${IPK_COUNT}"
+          echo "IPK 内 netifd-wireless.sh：${IPK_SCRIPT_COUNT}"
 
           echo
-          echo "============================================================"
+          echo "------------------------------------------------------------"
 
-          if [ "${SCRIPT_COUNT}" -gt 0 ] && [ "${PKG_COUNT}" -gt 0 ]; then
-            echo "✅ 已经确认：netifd-wireless.sh 进入了 NETIFD package 目录。"
-            echo
-            echo "下一步重点检查："
-            echo "NETIFD IPK 是否进入最终固件。"
+          if [ "${SCRIPT_COUNT}" -eq 0 ]; then
 
-          elif [ "${SCRIPT_COUNT}" -gt 0 ] && [ "${PKG_COUNT}" -eq 0 ]; then
-            echo "⚠️ 已确认源码存在，但当前没有进入 NETIFD package 目录。"
-            echo
-            echo "这时重点检查："
-            echo "NETIFD install/package 阶段。"
+            echo "❌ 结论：NETIFD 源码阶段就没有 netifd-wireless.sh。"
+            echo "重点：source / prepare / patch"
 
-          elif [ "${SCRIPT_COUNT}" -eq 0 ]; then
-            echo "❌ prepare 阶段就没有 netifd-wireless.sh。"
+          elif [ "${PKG_SCRIPT_COUNT}" -gt 0 ] && [ "${IPK_SCRIPT_COUNT}" -gt 0 ]; then
+
+            echo "✅ 结论：NETIFD package 完整。"
             echo
-            echo "重点检查："
-            echo "NETIFD 源码下载 / 解压 / patch。"
+            echo "netifd-wireless.sh 已经进入 IPK。"
+            echo
+            echo "下一阶段应该检查："
+            echo "最终固件 package selection / rootfs 安装。"
+
+          elif [ "${PKG_SCRIPT_COUNT}" -gt 0 ] && [ "${IPK_SCRIPT_COUNT}" -eq 0 ]; then
+
+            echo "⚠️ 结论：NETIFD PKGDIR 有文件，但 IPK 没包含。"
+            echo
+            echo "重点：IPK 打包阶段。"
+
+          elif [ "${SCRIPT_COUNT}" -gt 0 ] && [ "${PKG_SCRIPT_COUNT}" -eq 0 ]; then
+
+            echo "⚠️ 结论：NETIFD 源码有文件，但没有进入 PKGDIR。"
+            echo
+            echo "重点：Package/netifd/install 阶段。"
 
           else
-            echo "⚠️ 当前诊断没有足够的 package 输出。"
+
+            echo "⚠️ 结论：当前没有获得完整 package 输出。"
+            echo
+            echo "需要结合上面的 NETIFD compile 日志判断是否被 toolchain 阻断。"
+
           fi
 
           echo
           echo "============================================================"
-          echo "🏁 v3 诊断结束"
+          echo "🏁 NETIFD v4 诊断结束"
           echo "============================================================"
