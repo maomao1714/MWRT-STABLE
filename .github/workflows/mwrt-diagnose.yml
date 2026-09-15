@@ -1,892 +1,414 @@
 name: "🔬 MWRT-STABLE 配置根因诊断"
+
 on:
   workflow_dispatch:
     inputs:
       device:
         description: "选择诊断设备"
-required: true
-type: choice
-options:
-- wh3000
-- wh3000pro
-- re-sp-01b
-default: wh3000pro
+        required: true
+        type: choice
+        options:
+          - wh3000
+          - wh3000pro
+          - re-sp-01b
+        default: wh3000pro
 
-kernel:
-    description: "选择内核"
-    required: true
-    type: choice
-    options:
-      - "6.6"
-      - "latest"
-    default: "latest"
+      kernel:
+        description: "选择内核"
+        required: true
+        type: choice
+        options:
+          - "6.6"
+          - "latest"
+        default: "latest"
 
 permissions:
-contents: read
+  contents: read
 
 env:
-LEDE_REPO: "https://github.com/coolsnowwolf/lede.git"
-LEDE_BRANCH: "master"
-LEDE_DIR: "openwrt"
-TZ: "Asia/Shanghai"
+  LEDE_REPO: "https://github.com/coolsnowwolf/lede.git"
+  LEDE_BRANCH: "master"
+  LEDE_DIR: "openwrt"
+  TZ: "Asia/Shanghai"
 
 jobs:
-diagnose:
-name: "${{ inputs.device }} / Linux ${{ inputs.kernel }} / 配置诊断"
-runs-on: ubuntu-22.04
-timeout-minutes: 90
-
-steps:
-
-  - name: "📥 Checkout MWRT"
-    uses: actions/checkout@v4
-
-  - name: "💽 Runner 状态"
-    shell: bash
-    run: |
-      set -Eeuo pipefail
-
-      echo "=========================================="
-      echo "💽 Runner 磁盘"
-      echo "=========================================="
-      df -h
-
-      echo
-      echo "=========================================="
-      echo "🧠 Runner 内存"
-      echo "=========================================="
-      free -h
-
-  - name: "📥 获取 LEDE master"
-    shell: bash
-    run: |
-      set -Eeuo pipefail
-
-      rm -rf "${LEDE_DIR}"
-
-      git clone \
-        --depth=1 \
-        --single-branch \
-        --branch "${LEDE_BRANCH}" \
-        "${LEDE_REPO}" \
-        "${LEDE_DIR}"
-
-      cd "${LEDE_DIR}"
-
-      echo "=========================================="
-      echo "📥 LEDE 源码"
-      echo "=========================================="
-
-      echo "Repository : ${LEDE_REPO}"
-      echo "Branch     : ${LEDE_BRANCH}"
-      echo "Commit     : $(git rev-parse HEAD)"
-
-      echo
-      git log -1 --oneline
-
-  - name: "🔎 检查 MWRT 文件"
-    shell: bash
-    run: |
-      set -Eeuo pipefail
-
-      echo "=========================================="
-      echo "🔎 MWRT 文件检查"
-      echo "=========================================="
-
-      case "${{ inputs.device }}" in
-        wh3000)
-          CONFIG_FILE="${GITHUB_WORKSPACE}/wh3000.config"
-          ;;
-        wh3000pro)
-          CONFIG_FILE="${GITHUB_WORKSPACE}/wh3000pro.config"
-          ;;
-        re-sp-01b)
-          CONFIG_FILE="${GITHUB_WORKSPACE}/re-sp-01b.config"
-          ;;
-        *)
-          echo "❌ 未知设备"
-          exit 1
-          ;;
-      esac
-
-      for f in \
-        "${GITHUB_WORKSPACE}/diy-part1.sh" \
-        "${GITHUB_WORKSPACE}/diy-part2.sh" \
-        "${CONFIG_FILE}"
-      do
-        if [ ! -f "${f}" ]; then
-          echo "❌ 文件不存在：${f}"
-          exit 1
-        fi
-
-        echo "✅ ${f}"
-      done
-
-      echo "CONFIG_FILE=${CONFIG_FILE}" >> "${GITHUB_ENV}"
-
-      echo
-      echo "Device : ${{ inputs.device }}"
-      echo "Kernel : ${{ inputs.kernel }}"
-      echo "Config : ${CONFIG_FILE}"
-  - name: "📦 [01] 加载设备 .config"
-    shell: bash
-    run: |
-   set -Eeuo pipefail
-  
-      cd "${LEDE_DIR}"
-
-    cp "${CONFIG_FILE}" .config
-
-    echo "=========================================="
-    echo "📦 [01] 原始配置加载完成"
-    echo "=========================================="
-
-    echo
-    echo "===== TARGET ====="
-    grep '^CONFIG_TARGET_' .config || true
-
-    echo
-    echo "===== 重点配置：原始状态 ====="
-
-    grep -E \
-      '^CONFIG_PACKAGE_(luci-theme-design|luci-app-design-config|docker|dockerd|containerd|runc|tini|luci-app-dockerman|dockerd-compose|cgroupfs-mount|lucky|luci-app-lucky|wifi-scripts|kmod-mac80211|kmod-cfg80211|kmod-mt76-core|kmod-mt76-connac|kmod-mt7915e|kmod-mt7981-firmware|mt7981-wo-firmware|wireless-regdb|iwinfo|rpcd-mod-iwinfo|wpad-openssl-mbedtls|wpad-openssl)=' \
-      .config || true
-
-    echo
-    echo "===== 重点配置数量 ====="
-
-    grep -Ec \
-      '^CONFIG_PACKAGE_(luci-theme-design|luci-app-design-config|docker|dockerd|containerd|runc|tini|luci-app-dockerman|dockerd-compose|cgroupfs-mount|lucky|luci-app-lucky|wifi-scripts|kmod-mt7915e|wpad-openssl-mbedtls|wpad-openssl)=' \
-      .config || true
-
-
-- name: "🐧 [02] Kernel 基线"
-  shell: bash
-  run: |
-    set -Eeuo pipefail
-
-    cd "${LEDE_DIR}"
-
-    DEVICE="${{ inputs.device }}"
-    KERNEL="${{ inputs.kernel }}"
-
-    case "${DEVICE}" in
-      wh3000|wh3000pro)
-        TARGET_MAKEFILE="target/linux/mediatek/Makefile"
-        TARGET_DIR="target/linux/mediatek"
-        ;;
-      re-sp-01b)
-        TARGET_MAKEFILE="target/linux/ramips/Makefile"
-        TARGET_DIR="target/linux/ramips"
-        ;;
-      *)
-        echo "❌ 未知设备"
-        exit 1
-        ;;
-    esac
-
-    echo "=========================================="
-    echo "🐧 [02] Kernel 基线"
-    echo "=========================================="
-
-    echo "Device : ${DEVICE}"
-    echo "Kernel : ${KERNEL}"
-
-    echo
-    echo "===== 当前 Target Kernel ====="
-
-    grep -E \
-      '^[[:space:]]*KERNEL_PATCHVER|^[[:space:]]*KERNEL_TESTING_PATCHVER' \
-      "${TARGET_MAKEFILE}" \
-      || true
-
-    echo
-    echo "===== Kernel patchset ====="
-
-    if [ -d "${TARGET_DIR}/patches-6.6" ]; then
-      echo "✅ ${TARGET_DIR}/patches-6.6"
-    else
-      echo "⚠️ ${TARGET_DIR}/patches-6.6 不存在"
-    fi
-
-    if [ -d "${TARGET_DIR}/patches-6.1" ]; then
-      echo "✅ ${TARGET_DIR}/patches-6.1"
-    else
-      echo "⚠️ ${TARGET_DIR}/patches-6.1 不存在"
-    fi
-
-
-- name: "🧠 [03] 设置 Kernel 策略"
-  shell: bash
-  run: |
-    set -Eeuo pipefail
-
-    cd "${LEDE_DIR}"
-
-    DEVICE="${{ inputs.device }}"
-    KERNEL="${{ inputs.kernel }}"
-
-    case "${DEVICE}" in
-      wh3000|wh3000pro)
-        TARGET_MAKEFILE="target/linux/mediatek/Makefile"
-        TARGET_DIR="target/linux/mediatek"
-        ;;
-      re-sp-01b)
-        TARGET_MAKEFILE="target/linux/ramips/Makefile"
-        TARGET_DIR="target/linux/ramips"
-        ;;
-      *)
-        echo "❌ 未知设备"
-        exit 1
-        ;;
-    esac
-
-    echo "=========================================="
-    echo "🧠 [03] Kernel 策略"
-    echo "=========================================="
-
-    sed -i \
-      -e '/^CONFIG_TESTING_KERNEL=/d' \
-      -e '/^CONFIG_LINUX_6_1=/d' \
-      -e '/^CONFIG_LINUX_6_6=/d' \
-      -e '/^CONFIG_LINUX_6_12=/d' \
-      -e '/^CONFIG_LINUX_6_18=/d' \
-      .config
-
-    echo "# CONFIG_TESTING_KERNEL is not set" >> .config
-
-    case "${KERNEL}" in
-      latest)
-        echo "✅ 使用 LEDE master 当前默认 Kernel"
-        ;;
-      6.6)
-        if [ ! -d "${TARGET_DIR}/patches-6.6" ]; then
-          echo "❌ 当前源码没有 ${TARGET_DIR}/patches-6.6"
-          exit 1
-        fi
-
-        sed -i \
-          's/^KERNEL_PATCHVER:=.*/KERNEL_PATCHVER:=6.6/' \
-          "${TARGET_MAKEFILE}"
-
-        echo "✅ 已设置 KERNEL_PATCHVER=6.6"
-        ;;
-      *)
-        echo "❌ 无效 Kernel：${KERNEL}"
-        exit 1
-        ;;
-    esac
-
-    echo
-    echo "===== Kernel 最终状态 ====="
+  diagnose:
+    name: "${{ inputs.device }} / Linux ${{ inputs.kernel }} / 配置诊断"
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+
+    steps:
+
+      - name: "📥 Checkout MWRT"
+        uses: actions/checkout@v4
+
+      - name: "💽 Runner 状态"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          echo "=========================================="
+          echo "🔬 MWRT-STABLE 配置根因诊断"
+          echo "=========================================="
+
+          echo
+          echo "Device : ${{ inputs.device }}"
+          echo "Kernel : ${{ inputs.kernel }}"
+          echo "Runner : $(uname -a)"
+
+          echo
+          echo "===== 磁盘 ====="
+          df -h
+
+          echo
+          echo "===== 内存 ====="
+          free -h
+
+          echo
+          echo "===== CPU ====="
+          nproc
+
+      - name: "🧰 安装基础依赖"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          sudo apt-get update
+
+          sudo apt-get install -y \
+            build-essential \
+            clang \
+            flex \
+            bison \
+            g++ \
+            gawk \
+            gettext \
+            git \
+            libncurses-dev \
+            libssl-dev \
+            python3 \
+            rsync \
+            unzip \
+            zlib1g-dev \
+            file \
+            wget \
+            curl
+
+      - name: "📥 获取 LEDE"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          rm -rf "${LEDE_DIR}"
+
+          git clone \
+            --depth=1 \
+            --single-branch \
+            --branch "${LEDE_BRANCH}" \
+            "${LEDE_REPO}" \
+            "${LEDE_DIR}"
+
+          cd "${LEDE_DIR}"
+
+          LEDE_COMMIT="$(git rev-parse HEAD)"
+
+          echo "LEDE_COMMIT=${LEDE_COMMIT}" >> "${GITHUB_ENV}"
+
+          echo
+          echo "=========================================="
+          echo "📥 LEDE 源码"
+          echo "=========================================="
+
+          echo "Repository : ${LEDE_REPO}"
+          echo "Branch     : ${LEDE_BRANCH}"
+          echo "Commit     : ${LEDE_COMMIT}"
+
+          echo
+          git log -1 --oneline
+
+      - name: "🔎 检查基础文件"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          echo "=========================================="
+          echo "🔎 MWRT 基础文件检查"
+          echo "=========================================="
 
-    grep -E \
-      '^[[:space:]]*KERNEL_PATCHVER|^[[:space:]]*KERNEL_TESTING_PATCHVER' \
-      "${TARGET_MAKEFILE}" \
-      || true
-
+          for f in \
+            "${GITHUB_WORKSPACE}/diy-part1.sh" \
+            "${GITHUB_WORKSPACE}/diy-part2.sh" \
+            "${GITHUB_WORKSPACE}/wh3000.config" \
+            "${GITHUB_WORKSPACE}/wh3000pro.config" \
+            "${GITHUB_WORKSPACE}/re-sp-01b.config"
+          do
 
-- name: "🔍 [04] Kernel 后检查 .config"
-  shell: bash
-  run: |
-    set -Eeuo pipefail
+            if [ ! -f "${f}" ]; then
+              echo "❌ 缺少文件：${f}"
+              exit 1
+            fi
 
-    cd "${LEDE_DIR}"
+            echo "✅ ${f}"
 
-    echo "=========================================="
-    echo "🔍 [04] Kernel 后配置快照"
-    echo "=========================================="
+          done
 
-    grep -E \
-      '^CONFIG_PACKAGE_(luci-theme-design|luci-app-design-config|docker|dockerd|containerd|runc|tini|luci-app-dockerman|dockerd-compose|cgroupfs-mount|lucky|luci-app-lucky|wifi-scripts|kmod-mt7915e|wpad-openssl-mbedtls|wpad-openssl)=' \
-      .config || true
+      - name: "📦 [01] 加载设备 .config"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
 
+          cd "${LEDE_DIR}"
 
-- name: "🔧 [05] 执行真实 DIY1"
-  shell: bash
-  run: |
-    set -Eeuo pipefail
+          case "${{ inputs.device }}" in
 
-    cd "${LEDE_DIR}"
+            wh3000)
+              CONFIG_FILE="${GITHUB_WORKSPACE}/wh3000.config"
+              ;;
 
-    chmod +x "${GITHUB_WORKSPACE}/diy-part1.sh"
+            wh3000pro)
+              CONFIG_FILE="${GITHUB_WORKSPACE}/wh3000pro.config"
+              ;;
 
-    bash "${GITHUB_WORKSPACE}/diy-part1.sh"
-
-    echo "✅ DIY1 完成"
+            re-sp-01b)
+              CONFIG_FILE="${GITHUB_WORKSPACE}/re-sp-01b.config"
+              ;;
 
+            *)
+              echo "❌ 未知设备"
+              exit 1
+              ;;
 
-- name: "🔍 [06] DIY1 后配置快照"
-  shell: bash
-  run: |
-    set -Eeuo pipefail
+          esac
 
-    cd "${LEDE_DIR}"
+          if [ ! -f "${CONFIG_FILE}" ]; then
+            echo "❌ 找不到配置文件：${CONFIG_FILE}"
+            exit 1
+          fi
 
-    echo "=========================================="
-    echo "🔍 [06] DIY1 后"
-    echo "=========================================="
+          echo "CONFIG_FILE=${CONFIG_FILE}" >> "${GITHUB_ENV}"
 
-    echo
-    echo "===== .config ====="
+          cp "${CONFIG_FILE}" .config
 
-    grep -E \
-      '^CONFIG_PACKAGE_(luci-theme-design|luci-app-design-config|docker|dockerd|containerd|runc|tini|luci-app-dockerman|dockerd-compose|cgroupfs-mount|lucky|luci-app-lucky|wifi-scripts|kmod-mt7915e|wpad-openssl-mbedtls|wpad-openssl)=' \
-      .config || true
+          echo
+          echo "=========================================="
+          echo "📦 [01] 原始设备配置"
+          echo "=========================================="
 
-    echo
-    echo "===== feeds.conf.default ====="
+          echo "Device : ${{ inputs.device }}"
+          echo "Config : ${CONFIG_FILE}"
 
-    grep -nE \
-      'lucky|qmodem|rtp2httpd' \
-      feeds.conf.default || true
-- name: "📡 [07] 更新并安装真实 feeds"
-  shell: bash
-  run: |
-  set -Eeuo pipefail
-  
-      cd "${LEDE_DIR}"
-
-    echo "=========================================="
-    echo "📡 [07] 开始更新 feeds"
-    echo "=========================================="
-
-    ./scripts/feeds update -a
-    ./scripts/feeds install -a
-
-    echo
-    echo "===== QModem feed ====="
-
-    ./scripts/feeds update qmodem
-    ./scripts/feeds install -a -p qmodem
-
-    echo
-    echo "✅ feeds 全部完成"
-
-
-- name: "🔍 [08] feeds 后配置快照"
-  shell: bash
-  run: |
-    set -Eeuo pipefail
-
-    cd "${LEDE_DIR}"
-
-    echo "=========================================="
-    echo "🔍 [08] feeds 完成后"
-    echo "=========================================="
-
-    echo
-    echo "===== Design ====="
-
-    grep -E \
-      '^CONFIG_PACKAGE_(luci-theme-design|luci-app-design-config)=' \
-      .config || true
-
-    echo
-    echo "===== Docker ====="
+          echo
+          echo "===== TARGET ====="
 
-    grep -E \
-      '^CONFIG_PACKAGE_(docker|dockerd|containerd|runc|tini|luci-app-dockerman|dockerd-compose|cgroupfs-mount)=' \
-      .config || true
+          grep '^CONFIG_TARGET_' .config || true
 
-    echo
-    echo "===== Lucky ====="
+          echo
+          echo "===== Kernel ====="
 
-    grep -E \
-      '^CONFIG_PACKAGE_(lucky|luci-app-lucky)=' \
-      .config || true
+          grep -E \
+            '^CONFIG_(LINUX_|TESTING_KERNEL)' \
+            .config || true
 
-    echo
-    echo "===== Wi-Fi ====="
+          echo
+          echo "===== Design / Docker / Lucky / Wi-Fi ====="
 
-    grep -E \
-      '^CONFIG_PACKAGE_(wifi-scripts|kmod-mac80211|kmod-cfg80211|kmod-mt76-core|kmod-mt76-connac|kmod-mt7915e|kmod-mt7981-firmware|mt7981-wo-firmware|wireless-regdb|iwinfo|rpcd-mod-iwinfo|wpad-openssl-mbedtls|wpad-openssl)=' \
-      .config || true
+          grep -E \
+            '^CONFIG_PACKAGE_(luci-theme-design|luci-app-design-config|docker|dockerd|containerd|runc|tini|luci-app-dockerman|dockerd-compose|cgroupfs-mount|lucky|luci-app-lucky|wifi-scripts|kmod-mac80211|kmod-cfg80211|kmod-mt76-core|kmod-mt76-connac|kmod-mt7915e|kmod-mt7981-firmware|mt7981-wo-firmware|wireless-regdb|iwinfo|rpcd-mod-iwinfo|wpad-openssl-mbedtls|wpad-openssl)=' \
+            .config || true
+                  - name: "🐧 [02] Kernel 基线与策略"
+        shell: bash
+        run: |
+          set -e
 
-    echo
-    echo "===== feeds 目录 ====="
+          cd "${LEDE_DIR}"
 
-    for feed in lucky qmodem rtp2httpd; do
-      if [ -d "feeds/${feed}" ]; then
-        echo "✅ feeds/${feed}"
-      else
-        echo "❌ feeds/${feed}"
-      fi
-    done
+          echo "========================================"
+          echo "🐧 Kernel 基线与策略"
+          echo "========================================"
 
+          echo "当前内核相关配置："
+          grep -E \
+            '^(CONFIG_TESTING_KERNEL|CONFIG_LINUX_6_1|CONFIG_LINUX_6_6|CONFIG_LINUX_6_12|CONFIG_LINUX_6_18)=' \
+            .config || true
 
-- name: "🔎 [09] 检查关键 Package 源码"
-  shell: bash
-  run: |
-    set -Eeuo pipefail
+          echo
+          echo "执行与正式 mwrt-stable.yml 相同的 Kernel 策略..."
 
-    cd "${LEDE_DIR}"
+          sed -i \
+            -e '/^CONFIG_TESTING_KERNEL=/d' \
+            -e '/^CONFIG_LINUX_6_1=/d' \
+            -e '/^CONFIG_LINUX_6_6=/d' \
+            -e '/^CONFIG_LINUX_6_12=/d' \
+            -e '/^CONFIG_LINUX_6_18=/d' \
+            .config
 
-    echo "=========================================="
-    echo "🔎 [09] Package 源码检查"
-    echo "=========================================="
+          echo '# CONFIG_TESTING_KERNEL is not set' >> .config
 
-    check_pkg() {
-      local pkg="$1"
+          if [ "${{ inputs.kernel }}" = "6.6" ]; then
+            echo "CONFIG_LINUX_6_6=y" >> .config
+          else
+            echo "使用当前源码默认/最新稳定内核策略"
+          fi
 
-      echo
-      echo "------------------------------------------"
-      echo "PACKAGE: ${pkg}"
-      echo "------------------------------------------"
+          echo
+          echo "Kernel 策略执行后："
+          grep -E \
+            '^(CONFIG_TESTING_KERNEL|CONFIG_LINUX_6_1|CONFIG_LINUX_6_6|CONFIG_LINUX_6_12|CONFIG_LINUX_6_18)=' \
+            .config || true
 
-      if grep -RqsE \
-        "^[[:space:]]*PKG_NAME[[:space:]]*:=[[:space:]]*${pkg}[[:space:]]*$|^[[:space:]]*define[[:space:]]+(Package|KernelPackage)/${pkg}([[:space:]]|$)" \
-        package feeds \
-        --include='Makefile' \
-        --include='*.mk' \
-        2>/dev/null
-      then
-        echo "✅ 找到源码定义"
-
-        grep -RnsE \
-          "^[[:space:]]*PKG_NAME[[:space:]]*:=[[:space:]]*${pkg}[[:space:]]*$|^[[:space:]]*define[[:space:]]+(Package|KernelPackage)/${pkg}([[:space:]]|$)" \
-          package feeds \
-          --include='Makefile' \
-          --include='*.mk' \
-          2>/dev/null \
-          | head -20
-      else
-        echo "❌ 没有找到源码定义"
-      fi
-    }
-
-    check_pkg "luci-theme-design"
-    check_pkg "luci-app-design-config"
-
-    check_pkg "docker"
-    check_pkg "dockerd"
-    check_pkg "containerd"
-    check_pkg "runc"
-    check_pkg "tini"
-    check_pkg "luci-app-dockerman"
-
-    check_pkg "lucky"
-    check_pkg "luci-app-lucky"
 
-    check_pkg "kmod-mt7915e"
+      - name: "🧩 [03] 执行真实 DIY1"
+        shell: bash
+        run: |
+          set -e
 
+          cd "${LEDE_DIR}"
 
-- name: "🔧 [10] 执行真实 DIY2"
-  shell: bash
-  run: |
-    set -Eeuo pipefail
+          echo "========================================"
+          echo "🧩 执行仓库中的真实 diy-part1.sh"
+          echo "========================================"
 
-    cd "${LEDE_DIR}"
+          if [ ! -f ../diy-part1.sh ]; then
+            echo "❌ 找不到 diy-part1.sh"
+            exit 1
+          fi
 
-    chmod +x "${GITHUB_WORKSPACE}/diy-part2.sh"
+          echo "DIY1 行数："
+          wc -l ../diy-part1.sh
 
-    bash "${GITHUB_WORKSPACE}/diy-part2.sh"
+          echo
+          echo "开始执行："
+          bash ../diy-part1.sh
 
-    echo "✅ DIY2 完成"
+          echo
+          echo "✅ DIY1 执行完成"
 
 
-- name: "🔍 [11] DIY2 后配置快照"
-  shell: bash
-  run: |
-    set -Eeuo pipefail
+      - name: "🔎 [04] DIY1 后配置快照"
+        shell: bash
+        run: |
+          set +e
 
-    cd "${LEDE_DIR}"
-
-    echo "=========================================="
-    echo "🔍 [11] DIY2 完成后"
-    echo "=========================================="
-
-    echo
-    echo "===== Design ====="
-
-    grep -E \
-      '^CONFIG_PACKAGE_(luci-theme-design|luci-app-design-config)=' \
-      .config || true
-
-    echo
-    echo "===== Docker ====="
-
-    grep -E \
-      '^CONFIG_PACKAGE_(docker|dockerd|containerd|runc|tini|luci-app-dockerman|dockerd-compose|cgroupfs-mount)=' \
-      .config || true
-
-    echo
-    echo "===== Lucky ====="
-
-    grep -E \
-      '^CONFIG_PACKAGE_(lucky|luci-app-lucky)=' \
-      .config || true
-
-    echo
-    echo "===== Wi-Fi ====="
-
-    grep -E \
-      '^CONFIG_PACKAGE_(wifi-scripts|kmod-mac80211|kmod-cfg80211|kmod-mt76-core|kmod-mt76-connac|kmod-mt7915e|kmod-mt7981-firmware|mt7981-wo-firmware|wireless-regdb|iwinfo|rpcd-mod-iwinfo|wpad-openssl-mbedtls|wpad-openssl)=' \
-      .config || true
-- name: "📶 [12] 执行真实 QModem 配置"
-  shell: bash
-  run: |
-  set -Eeuo pipefail
-  
-      cd "${LEDE_DIR}"
-
-    echo "=========================================="
-    echo "📶 [12] QModem 配置"
-    echo "=========================================="
-
-    sed -i \
-      -e '/^CONFIG_PACKAGE_qmodem=/d' \
-      -e '/^CONFIG_PACKAGE_luci-app-qmodem=/d' \
-      -e '/^CONFIG_PACKAGE_luci-app-qmodem-next=/d' \
-      -e '/^CONFIG_PACKAGE_qmodem-sipd=/d' \
-      -e '/^CONFIG_PACKAGE_qmodem-voip=/d' \
-      -e '/^CONFIG_PACKAGE_luci-app-qmodem-sms=/d' \
-      -e '/^CONFIG_PACKAGE_luci-app-qmodem-ttl=/d' \
-      -e '/^CONFIG_PACKAGE_sms-forwarder-next=/d' \
-      -e '/^CONFIG_PACKAGE_quectel-CM-5G-M=/d' \
-      .config
-
-    cat >> .config <<'EOF'
-
-CONFIG_PACKAGE_qmodem=y
-CONFIG_PACKAGE_luci-app-qmodem-next=y
-CONFIG_PACKAGE_sms-forwarder-next=y
-CONFIG_PACKAGE_quectel-CM-5G-M=y
-EOF
-
-      echo
-      echo "===== QModem 配置结果 ====="
-
-      grep -E \
-        '^CONFIG_PACKAGE_(qmodem|luci-app-qmodem-next|sms-forwarder-next|quectel-CM-5G-M)=' \
-        .config || true
-
-
-  - name: "🔍 [13] QModem 后配置快照"
-    shell: bash
-    run: |
-      set -Eeuo pipefail
-
-      cd "${LEDE_DIR}"
-
-      echo "=========================================="
-      echo "🔍 [13] QModem 后关键配置"
-      echo "=========================================="
-
-      echo
-      echo "===== Design ====="
-
-      grep -E \
-        '^CONFIG_PACKAGE_(luci-theme-design|luci-app-design-config)=' \
-        .config || true
-
-      echo
-      echo "===== Docker ====="
-
-      grep -E \
-        '^CONFIG_PACKAGE_(docker|dockerd|containerd|runc|tini|luci-app-dockerman|dockerd-compose|cgroupfs-mount)=' \
-        .config || true
-
-      echo
-      echo "===== Lucky ====="
-
-      grep -E \
-        '^CONFIG_PACKAGE_(lucky|luci-app-lucky)=' \
-        .config || true
-
-      echo
-      echo "===== Wi-Fi ====="
-
-      grep -E \
-        '^CONFIG_PACKAGE_(wifi-scripts|kmod-mac80211|kmod-cfg80211|kmod-mt76-core|kmod-mt76-connac|kmod-mt7915e|kmod-mt7981-firmware|mt7981-wo-firmware|wireless-regdb|iwinfo|rpcd-mod-iwinfo|wpad-openssl-mbedtls|wpad-openssl)=' \
-        .config || true
-
-      echo
-      echo "===== QModem ====="
-
-      grep -E \
-        '^CONFIG_PACKAGE_(qmodem|luci-app-qmodem-next|sms-forwarder-next|quectel-CM-5G-M)=' \
-        .config || true
-
-
-  - name: "📡 [14] WWAN 关键模块检查"
-    shell: bash
-    run: |
-      set -Eeuo pipefail
-
-      cd "${LEDE_DIR}"
-
-      echo "=========================================="
-      echo "📡 [14] WWAN 关键模块"
-      echo "=========================================="
-
-      find_pkg() {
-        local pkg="$1"
-        local name="${pkg#kmod-}"
-
-        grep -RqsE \
-          "^[[:space:]]*PKG_NAME[[:space:]]*:=[[:space:]]*(${pkg}|${name})[[:space:]]*$|^[[:space:]]*define[[:space:]]+(Package|KernelPackage)/(${pkg}|${name})([[:space:]]|$)" \
-          package feeds \
-          --include='Makefile' \
-          --include='*.mk' \
-          2>/dev/null
-      }
-
-      WWAN_PACKAGES=(
-        kmod-usb-net
-        kmod-usb-net-cdc-ether
-        kmod-usb-net-cdc-mbim
-        kmod-usb-net-cdc-ncm
-        kmod-usb-net-rndis
-        kmod-usb-net-qmi-wwan
-        kmod-usb-serial
-        kmod-usb-serial-option
-        kmod-usb-serial-wwan
-        kmod-usb-serial-qualcomm
-        kmod-usb-serial-sierra
-        kmod-usb-wdm
-        kmod-qmi_wwan
-        kmod-qmi_wwan_f
-        kmod-qmi_wwan_q
-        kmod-qmi_wwan_s
-        kmod-ppp
-        ppp
-        ppp-mod-pppoe
-        kmod-mhi-bus
-        kmod-mhi-net
-        kmod-mhi-pci
-        kmod-mhi-pci-generic
-        kmod-mhi-wwan
-        kmod-mhi-wwan-ctrl
-        kmod-mhi-wwan-mbim
-      )
-
-      for pkg in "${WWAN_PACKAGES[@]}"; do
-        if find_pkg "${pkg}"; then
-          echo "CONFIG_PACKAGE_${pkg}=m" >> .config
-          echo "✅ ${pkg}"
-        else
-          echo "⚠️ 未找到：${pkg}"
-        fi
-      done
-
-      echo
-      echo "===== 当前 WWAN 配置 ====="
-
-      grep -E \
-        '^CONFIG_PACKAGE_(kmod-usb-net|kmod-usb-net-cdc-ether|kmod-usb-net-cdc-mbim|kmod-usb-net-cdc-ncm|kmod-usb-net-rndis|kmod-usb-net-qmi-wwan|kmod-usb-serial|kmod-usb-serial-option|kmod-usb-serial-wwan|kmod-usb-serial-qualcomm|kmod-usb-serial-sierra|kmod-usb-wdm|kmod-qmi_wwan|kmod-qmi_wwan_f|kmod-qmi_wwan_q|kmod-qmi_wwan_s|kmod-ppp|ppp|ppp-mod-pppoe|kmod-mhi-bus|kmod-mhi-net|kmod-mhi-pci|kmod-mhi-pci-generic|kmod-mhi-wwan|kmod-mhi-wwan-ctrl|kmod-mhi-wwan-mbim)=' \
-        .config || true
-
-
-  - name: "🧾 [15] make defconfig 前最终快照"
-    shell: bash
-    run: |
-      set -Eeuo pipefail
-
-      cd "${LEDE_DIR}"
-
-      echo "=========================================="
-      echo "🧾 [15] make defconfig 前"
-      echo "=========================================="
-
-      echo
-      echo "===== TARGET ====="
-
-      grep -E \
-        '^CONFIG_TARGET_(mediatek|ramips)|^CONFIG_TARGET_.*DEVICE_' \
-        .config || true
-
-      echo
-      echo "===== KERNEL ====="
-
-      grep -E \
-        '^CONFIG_(TESTING_KERNEL|LINUX_6_1|LINUX_6_6|LINUX_6_12|LINUX_6_18)=' \
-        .config || true
-
-      echo
-      echo "===== DESIGN / DOCKER / LUCKY ====="
-
-      grep -E \
-        '^CONFIG_PACKAGE_(luci-theme-design|luci-app-design-config|docker|dockerd|containerd|runc|tini|luci-app-dockerman|dockerd-compose|cgroupfs-mount|lucky|luci-app-lucky)=' \
-        .config || true
-
-      echo
-      echo "===== WIFI ====="
-
-      grep -E \
-        '^CONFIG_PACKAGE_(wifi-scripts|kmod-mac80211|kmod-cfg80211|kmod-mt76-core|kmod-mt76-connac|kmod-mt7915e|kmod-mt7981-firmware|mt7981-wo-firmware|wireless-regdb|iwinfo|rpcd-mod-iwinfo|wpad-openssl-mbedtls|wpad-openssl)=' \
-        .config || true
-
-      echo
-      echo "===== QMODEM ====="
-
-      grep -E \
-        '^CONFIG_PACKAGE_(qmodem|luci-app-qmodem-next|sms-forwarder-next|quectel-CM-5G-M)=' \
-        .config || true
-
-      echo
-      echo "===== 配置文件 SHA256 ====="
-
-      sha256sum .config
-
-
-  - name: "⚙️ [16] 执行 make defconfig"
-    shell: bash
-    run: |
-      set -Eeuo pipefail
-
-      cd "${LEDE_DIR}"
-
-      echo "=========================================="
-      echo "⚙️ [16] make defconfig"
-      echo "=========================================="
-
-      make defconfig
-
-      echo
-      echo "✅ make defconfig 完成"
-
-
-  - name: "🚨 [17] defconfig 后最终根因结果"
-    shell: bash
-    run: |
-      set -Eeuo pipefail
-
-      cd "${LEDE_DIR}"
-
-      echo "=========================================="
-      echo "🚨 [17] defconfig 后最终配置"
-      echo "=========================================="
-
-      echo
-      echo "================================================"
-      echo "1️⃣ DESIGN"
-      echo "================================================"
-
-      grep -E \
-        '^CONFIG_PACKAGE_(luci-theme-design|luci-app-design-config)=' \
-        .config || true
-
-      echo
-      echo "================================================"
-      echo "2️⃣ DOCKER"
-      echo "================================================"
-
-      grep -E \
-        '^CONFIG_PACKAGE_(docker|dockerd|containerd|runc|tini|luci-app-dockerman|dockerd-compose|cgroupfs-mount)=' \
-        .config || true
-
-      echo
-      echo "================================================"
-      echo "3️⃣ LUCKY"
-      echo "================================================"
-
-      grep -E \
-        '^CONFIG_PACKAGE_(lucky|luci-app-lucky)=' \
-        .config || true
-
-      echo
-      echo "================================================"
-      echo "4️⃣ WIFI"
-      echo "================================================"
-
-      grep -E \
-        '^CONFIG_PACKAGE_(wifi-scripts|kmod-mac80211|kmod-cfg80211|kmod-mt76-core|kmod-mt76-connac|kmod-mt7915e|kmod-mt7981-firmware|mt7981-wo-firmware|wireless-regdb|iwinfo|rpcd-mod-iwinfo|wpad-openssl-mbedtls|wpad-openssl)=' \
-        .config || true
-
-      echo
-      echo "================================================"
-      echo "5️⃣ QMODEM"
-      echo "================================================"
-
-      grep -E \
-        '^CONFIG_PACKAGE_(qmodem|luci-app-qmodem-next|sms-forwarder-next|quectel-CM-5G-M)=' \
-        .config || true
-
-      echo
-      echo "================================================"
-      echo "6️⃣ TARGET / KERNEL"
-      echo "================================================"
-
-      grep -E \
-        '^CONFIG_TARGET_(mediatek|ramips)|^CONFIG_TARGET_.*DEVICE_' \
-        .config || true
-
-      grep -E \
-        '^CONFIG_(TESTING_KERNEL|LINUX_6_1|LINUX_6_6|LINUX_6_12|LINUX_6_18)=' \
-        .config || true
-
-      echo
-      echo "================================================"
-      echo "7️⃣ .config 中的关键反选项"
-      echo "================================================"
-
-      grep -E \
-        '^# CONFIG_PACKAGE_(luci-theme-design|luci-app-design-config|docker|dockerd|containerd|runc|tini|luci-app-dockerman|dockerd-compose|cgroupfs-mount|lucky|luci-app-lucky|kmod-mt7915e|kmod-mt76-core|kmod-mt76-connac) is not set$' \
-        .config || true
-
-      echo
-      echo "================================================"
-      echo "8️⃣ 结论"
-      echo "================================================"
-
-      check_config() {
-        local symbol="$1"
-
-        if grep -q "^${symbol}=y$" .config; then
-          echo "✅ ${symbol}=y"
-        elif grep -q "^${symbol}=m$" .config; then
-          echo "🟡 ${symbol}=m"
-        elif grep -q "^# ${symbol} is not set$" .config; then
-          echo "❌ ${symbol} 被 defconfig 关闭"
-        else
-          echo "⚠️ ${symbol} 不存在"
-        fi
-      }
-
-      echo
-      echo "----- Design -----"
-      check_config "CONFIG_PACKAGE_luci-theme-design"
-      check_config "CONFIG_PACKAGE_luci-app-design-config"
-
-      echo
-      echo "----- Docker -----"
-      check_config "CONFIG_PACKAGE_docker"
-      check_config "CONFIG_PACKAGE_dockerd"
-      check_config "CONFIG_PACKAGE_luci-app-dockerman"
-
-      echo
-      echo "----- Lucky -----"
-      check_config "CONFIG_PACKAGE_lucky"
-      check_config "CONFIG_PACKAGE_luci-app-lucky"
-
-      echo
-      echo "----- Wi-Fi -----"
-      check_config "CONFIG_PACKAGE_kmod-mac80211"
-      check_config "CONFIG_PACKAGE_kmod-cfg80211"
-      check_config "CONFIG_PACKAGE_kmod-mt76-core"
-      check_config "CONFIG_PACKAGE_kmod-mt76-connac"
-      check_config "CONFIG_PACKAGE_kmod-mt7915e"
-
-      echo
-      echo "----- QModem -----"
-      check_config "CONFIG_PACKAGE_qmodem"
-      check_config "CONFIG_PACKAGE_luci-app-qmodem-next"
-      check_config "CONFIG_PACKAGE_quectel-CM-5G-M"
-
-      echo
-      echo "=========================================="
-      echo "🔬 诊断完成"
-      echo "=========================================="
-      echo
-      echo "⚠️ 本工作流只进行配置诊断，不执行实际固件编译。"
-      echo "请重点观察："
-      echo "  [01] 原始 config"
-      echo "  [06] DIY1 后"
-      echo "  [08] feeds 后"
-      echo "  [11] DIY2 后"
-      echo "  [13] QModem 后"
-      echo "  [15] defconfig 前"
-      echo "  [17] defconfig 后"
-      echo
-      echo "如果某个项目从某一步开始消失，就可以定位到具体阶段。"
+          cd "${LEDE_DIR}"
+
+          echo "========================================"
+          echo "🔎 DIY1 后关键配置状态"
+          echo "========================================"
+
+          echo
+          echo "【Design】"
+          grep -E \
+            '^CONFIG_PACKAGE_(luci-theme-design|luci-app-design-config)=' \
+            .config || echo "⚠️ Design 配置不存在"
+
+          echo
+          echo "【Docker】"
+          grep -E \
+            '^CONFIG_PACKAGE_(docker|dockerd|containerd|runc|tini|luci-app-dockerman|dockerd-compose|cgroupfs-mount)=' \
+            .config || echo "⚠️ Docker 配置不存在"
+
+          echo
+          echo "【Lucky】"
+          grep -E \
+            '^CONFIG_PACKAGE_(lucky|luci-app-lucky)=' \
+            .config || echo "⚠️ Lucky 配置不存在"
+
+          echo
+          echo "【WH3000 / MT7981 Wi-Fi】"
+          grep -E \
+            '^CONFIG_PACKAGE_(kmod-mac80211|kmod-cfg80211|kmod-mt76-core|kmod-mt76-connac|kmod-mt7915e|kmod-mt7981-firmware|mt7981-wo-firmware|wireless-regdb|iwinfo|rpcd-mod-iwinfo)=' \
+            .config || echo "⚠️ Wi-Fi 关键配置不存在"
+
+          echo
+          echo "【QModem】"
+          grep -E \
+            '^CONFIG_PACKAGE_(qmodem|luci-app-qmodem-next|sms-forwarder-next|quectel-CM-5G-M)=' \
+            .config || echo "⚠️ QModem 当前尚未配置"
+
+          echo
+          echo "========================================"
+          echo "DIY1 后配置快照结束"
+          echo "========================================"
+
+
+      - name: "📡 [05] 更新并安装真实 feeds"
+        shell: bash
+        run: |
+          set -e
+
+          cd "${LEDE_DIR}"
+
+          echo "========================================"
+          echo "📡 执行真实 mwrt-stable.yml 的 feeds 操作"
+          echo "========================================"
+
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+          ./scripts/feeds update qmodem
+          ./scripts/feeds install -a -p qmodem
+
+          echo
+          echo "========================================"
+          echo "feeds 状态"
+          echo "========================================"
+
+          ./scripts/feeds list
+
+
+      - name: "🔎 [06] feeds 后源码与配置检查"
+        shell: bash
+        run: |
+          set +e
+
+          cd "${LEDE_DIR}"
+
+          echo "========================================"
+          echo "🔎 feeds 安装完成后的关键检查"
+          echo "========================================"
+
+          echo
+          echo "【Design 源码】"
+          find package feeds \
+            -maxdepth 5 \
+            -type d \
+            \( -iname '*luci-theme-design*' -o -iname '*design-config*' \) \
+            2>/dev/null | head -50
+
+          echo
+          echo "【Docker 源码】"
+          find package feeds \
+            -maxdepth 5 \
+            -type d \
+            \( -iname 'docker' -o -iname 'dockerd' -o -iname '*dockerman*' \) \
+            2>/dev/null | head -50
+
+          echo
+          echo "【Lucky 源码】"
+          find package feeds \
+            -maxdepth 5 \
+            -type d \
+            -iname '*lucky*' \
+            2>/dev/null | head -50
+
+          echo
+          echo "【QModem 源码】"
+          find package feeds \
+            -maxdepth 6 \
+            -type d \
+            -iname '*qmodem*' \
+            2>/dev/null | head -50
+
+          echo
+          echo "【MT7915 / mt76 源码】"
+          find package target \
+            -maxdepth 8 \
+            -type f \
+            \( -iname '*mt7915*' -o -iname '*mt76*' \) \
+            2>/dev/null | head -80
+
+          echo
+          echo "========================================"
+          echo "feeds 后检查结束"
+          echo "========================================"
+          
