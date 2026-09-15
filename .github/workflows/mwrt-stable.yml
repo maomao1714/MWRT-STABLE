@@ -129,7 +129,6 @@ jobs:
             gnutls-dev \
             help2man \
             intltool \
-            lib32gcc-dev \
             libc6-dev-i386 \
             libelf-dev \
             libffi-dev \
