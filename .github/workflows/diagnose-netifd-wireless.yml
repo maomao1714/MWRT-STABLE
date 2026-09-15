@@ -1,4 +1,4 @@
-name: 🔎 诊断 netifd-wireless.sh 来源
+name: "🔍 诊断 WiFi-Scripts / Netifd 角色"
 
 on:
   workflow_dispatch:
@@ -10,399 +10,471 @@ jobs:
   diagnose:
     runs-on: ubuntu-22.04
 
+    env:
+      LEDE_DIR: lede
+      CONFIG_FILE: wh3000pro.config
+
     steps:
 
       # ==========================================================
-      # 1. 拉取 LEDE
+      # 1. Checkout MWRT-STABLE
       # ==========================================================
-      - name: "📥 拉取 LEDE"
+      - name: "📥 Checkout MWRT-STABLE"
+        uses: actions/checkout@v4
+
+      # ==========================================================
+      # 2. 安装基础依赖
+      # ==========================================================
+      - name: "🧰 安装基础依赖"
         shell: bash
         run: |
           set -Eeuo pipefail
 
-          git clone --depth=1 \
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            clang \
+            flex \
+            bison \
+            gawk \
+            gettext \
+            git \
+            libncurses5-dev \
+            libncursesw5-dev \
+            libssl-dev \
+            python3 \
+            python3-distutils \
+            rsync \
+            unzip \
+            wget \
+            xsltproc \
+            zlib1g-dev
+
+      # ==========================================================
+      # 3. Clone LEDE
+      # ==========================================================
+      - name: "📦 Clone LEDE"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          rm -rf "${LEDE_DIR}"
+
+          git clone \
+            --depth=1 \
             --branch master \
             https://github.com/coolsnowwolf/lede.git \
-            lede
+            "${LEDE_DIR}"
 
-          cd lede
+          cd "${LEDE_DIR}"
 
           echo "=========================================="
-          echo "当前 LEDE"
+          echo "LEDE commit:"
           echo "=========================================="
+
           git log -1 --oneline
-          git rev-parse HEAD
-
 
       # ==========================================================
-      # 2. 搜索 netifd-wireless.sh
+      # 4. 检查设备配置
       # ==========================================================
-      - name: "🔎 搜索 netifd-wireless.sh"
+      - name: "📄 检查 WH3000 Pro 配置"
         shell: bash
         run: |
           set -Eeuo pipefail
 
-          cd lede
+          test -f "${CONFIG_FILE}"
 
           echo "=========================================="
-          echo "1. 全源码搜索 netifd-wireless.sh"
+          echo "设备配置文件"
           echo "=========================================="
 
-          find . \
-            -type f \
-            \( -name 'netifd-wireless.sh' \
-            -o -name '*wireless*.sh' \) \
-            -print \
-            | sort || true
-
-          echo
-          echo "=========================================="
-          echo "2. 搜索文件内容引用"
-          echo "=========================================="
-
-          grep -R \
-            -n \
-            --exclude-dir=.git \
-            "netifd-wireless.sh" \
-            . \
-            2>/dev/null \
-            | head -200 || true
-
-
-      # ==========================================================
-      # 3. 搜索 wifi-scripts
-      # ==========================================================
-      - name: "📦 分析 wifi-scripts"
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-
-          cd lede
-
-          echo "=========================================="
-          echo "wifi-scripts 相关目录"
-          echo "=========================================="
-
-          find package \
-            -type d \
-            \( -name 'wifi-scripts' \
-            -o -name 'netifd' \) \
-            -print \
-            | sort || true
-
-          echo
-          echo "=========================================="
-          echo "wifi-scripts 文件"
-          echo "=========================================="
-
-          find package \
-            -path '*wifi-scripts*' \
-            -type f \
-            -print \
-            | sort \
-            | head -300 || true
-
-
-      # ==========================================================
-      # 4. 搜索 CONFIG_PACKAGE_wifi-scripts
-      # ==========================================================
-      - name: "⚙️ 分析 CONFIG_PACKAGE_wifi-scripts"
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-
-          cd lede
-
-          echo "=========================================="
-          echo "搜索 CONFIG_PACKAGE_wifi-scripts"
-          echo "=========================================="
-
-          grep -R \
-            -n \
-            --exclude-dir=.git \
-            "CONFIG_PACKAGE_wifi-scripts" \
-            . \
-            2>/dev/null \
-            | head -200 || true
-
-          echo
-          echo "=========================================="
-          echo "搜索 Package/wifi-scripts"
-          echo "=========================================="
-
-          grep -R \
-            -n \
-            --exclude-dir=.git \
-            "Package/wifi-scripts" \
-            package \
-            2>/dev/null \
-            | head -100 || true
-
-
-      # ==========================================================
-      # 5. 分析 netifd
-      # ==========================================================
-      - name: "📡 分析 netifd"
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-
-          cd lede
-
-          echo "=========================================="
-          echo "netifd 目录"
-          echo "=========================================="
-
-          find package \
-            -path '*netifd*' \
-            -type f \
-            -maxdepth 12 \
-            -print \
-            | sort \
-            | head -300 || true
-
-          echo
-          echo "=========================================="
-          echo "netifd Makefile"
-          echo "=========================================="
-
-          find package \
-            -path '*netifd/Makefile' \
-            -print \
-            -exec sed -n '1,240p' {} \; \
-            2>/dev/null || true
-
-
-      # ==========================================================
-      # 6. 搜索 /lib/netifd
-      # ==========================================================
-      - name: "🔎 搜索 lib/netifd"
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-
-          cd lede
-
-          echo "=========================================="
-          echo "所有 lib/netifd 相关文件"
-          echo "=========================================="
-
-          find . \
-            -path '*/lib/netifd/*' \
-            -type f \
-            -print \
-            | sort \
-            | head -500 || true
-
-          echo
-          echo "=========================================="
-          echo "所有 netifd-wireless 相关文件"
-          echo "=========================================="
-
-          find . \
-            -type f \
-            | grep -E \
-              'netifd-wireless|wireless-device|wireless\.uc|mac80211' \
-            | sort \
-            | head -500 || true
-
-
-      # ==========================================================
-      # 7. 分析 git 历史
-      # ==========================================================
-      - name: "🕰️ 分析 git 历史"
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-
-          cd lede
-
-          echo "=========================================="
-          echo "搜索历史提交中的 netifd-wireless.sh"
-          echo "=========================================="
-
-          git log \
-            --all \
-            --oneline \
-            --name-status \
-            -- \
-            '*netifd-wireless.sh' \
-            2>/dev/null \
-            | head -300 || true
-
-          echo
-          echo "=========================================="
-          echo "搜索 wifi-scripts 历史"
-          echo "=========================================="
-
-          git log \
-            --all \
-            --oneline \
-            -- \
-            '*/wifi-scripts/*' \
-            2>/dev/null \
-            | head -200 || true
-
-
-      # ==========================================================
-      # 8. 分析最近 netifd / wifi-scripts 提交
-      # ==========================================================
-      - name: "🧬 分析 netifd / wifi-scripts 提交"
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-
-          cd lede
-
-          echo "=========================================="
-          echo "最近 netifd 相关提交"
-          echo "=========================================="
-
-          git log \
-            --all \
-            --oneline \
-            --decorate \
-            --grep='netifd' \
-            -i \
-            | head -100 || true
-
-          echo
-          echo "=========================================="
-          echo "最近 wifi-scripts 相关提交"
-          echo "=========================================="
-
-          git log \
-            --all \
-            --oneline \
-            --decorate \
-            --grep='wifi-scripts' \
-            -i \
-            | head -100 || true
-
-          echo
-          echo "=========================================="
-          echo "最近 wireless 相关提交"
-          echo "=========================================="
-
-          git log \
-            --all \
-            --oneline \
-            --decorate \
-            --grep='wireless' \
-            -i \
-            | head -100 || true
-
-
-      # ==========================================================
-      # 9. 检查历史版本 WH3000 Pro 引入点
-      # ==========================================================
-      - name: "📌 检查 WH3000 Pro 引入时的 Wi-Fi 环境"
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-
-          cd lede
-
-          BASE_COMMIT="949d0bd77"
-
-          echo "=========================================="
-          echo "WH3000 Pro 引入提交"
-          echo "=========================================="
-
-          git show \
-            --stat \
-            --oneline \
-            "${BASE_COMMIT}" \
+          grep -E \
+            '^CONFIG_TARGET_mediatek|^CONFIG_PACKAGE_(wifi-scripts|netifd|kmod-cfg80211|kmod-mac80211|kmod-mt76-core|kmod-mt76-connac|kmod-mt7915e|luci-theme-design)' \
+            "${CONFIG_FILE}" \
             || true
 
-          echo
+          cp "${CONFIG_FILE}" "${LEDE_DIR}/.config"
+
+      # ==========================================================
+      # 5. 安全更新 feeds
+      # ==========================================================
+      - name: "📡 安全更新并安装 feeds"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          cd "${LEDE_DIR}"
+
           echo "=========================================="
-          echo "WH3000 Pro 提交涉及文件"
+          echo "保存设备 .config"
           echo "=========================================="
 
-          git show \
-            --name-status \
-            --format=fuller \
-            "${BASE_COMMIT}" \
+          cp .config .config.device
+          rm -f .config
+
+          echo "=========================================="
+          echo "更新 feeds"
+          echo "=========================================="
+
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+          mv .config.device .config
+
+          echo "=========================================="
+          echo "feeds 完成后恢复 .config"
+          echo "=========================================="
+
+          grep -E \
+            '^CONFIG_PACKAGE_(wifi-scripts|netifd|kmod-cfg80211|kmod-mac80211)=' \
+            .config \
+            || true
+
+      # ==========================================================
+      # 6. 生成最终配置
+      # ==========================================================
+      - name: "⚙️ make defconfig"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          cd "${LEDE_DIR}"
+
+          make defconfig
+
+          echo "=========================================="
+          echo "最终 WiFi / Netifd 配置"
+          echo "=========================================="
+
+          grep -E \
+            '^CONFIG_PACKAGE_(wifi-scripts|netifd|kmod-cfg80211|kmod-mac80211|kmod-mt76-core|kmod-mt76-connac|kmod-mt7915e|wireless-regdb|iwinfo|rpcd-mod-iwinfo)=' \
+            .config \
+            || true
+
+      # ==========================================================
+      # 7. 检查 wifi-scripts 源码
+      # ==========================================================
+      - name: "🔎 检查 wifi-scripts 源码"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          cd "${LEDE_DIR}"
+
+          echo
+          echo "=================================================="
+          echo "① wifi-scripts 目录"
+          echo "=================================================="
+
+          if [ -d package/network/config/wifi-scripts ]; then
+            echo "✅ package/network/config/wifi-scripts 存在"
+            find package/network/config/wifi-scripts \
+              -maxdepth 5 \
+              -type f \
+              | sort
+          else
+            echo "❌ package/network/config/wifi-scripts 不存在"
+          fi
+
+          echo
+          echo "=================================================="
+          echo "② wifi-scripts Makefile"
+          echo "=================================================="
+
+          if [ -f package/network/config/wifi-scripts/Makefile ]; then
+            echo "✅ Makefile 存在"
+
+            sed -n '1,240p' \
+              package/network/config/wifi-scripts/Makefile
+          else
+            echo "❌ wifi-scripts Makefile 不存在"
+          fi
+
+          echo
+          echo "=================================================="
+          echo "③ wifi-scripts 中搜索 netifd-wireless.sh"
+          echo "=================================================="
+
+          grep -Rni \
+            "netifd-wireless.sh" \
+            package/network/config/wifi-scripts \
+            || true
+
+      # ==========================================================
+      # 8. 检查 netifd Makefile
+      # ==========================================================
+      - name: "🔎 检查 netifd 安装逻辑"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          cd "${LEDE_DIR}"
+
+          echo
+          echo "=================================================="
+          echo "① netifd Makefile"
+          echo "=================================================="
+
+          if [ -f package/network/config/netifd/Makefile ]; then
+            echo "✅ netifd Makefile 存在"
+
+            sed -n '1,260p' \
+              package/network/config/netifd/Makefile
+          else
+            echo "❌ netifd Makefile 不存在"
+          fi
+
+          echo
+          echo "=================================================="
+          echo "② netifd Makefile 搜索 wireless"
+          echo "=================================================="
+
+          grep -nEi \
+            "wireless|netifd-wireless|scripts/" \
+            package/network/config/netifd/Makefile \
+            || true
+
+      # ==========================================================
+      # 9. 检查 netifd 源码包配置
+      # ==========================================================
+      - name: "🔎 检查 netifd package 源码"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          cd "${LEDE_DIR}"
+
+          echo
+          echo "=================================================="
+          echo "netifd package 全部相关文件"
+          echo "=================================================="
+
+          find package/network/config/netifd \
+            -maxdepth 6 \
+            -type f \
+            | sort
+
+          echo
+          echo "=================================================="
+          echo "netifd package 搜索 netifd-wireless.sh"
+          echo "=================================================="
+
+          grep -Rni \
+            "netifd-wireless.sh" \
+            package/network/config/netifd \
+            || true
+
+      # ==========================================================
+      # 10. 检查 mac80211 无线脚本
+      # ==========================================================
+      - name: "📡 检查 mac80211 无线脚本"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          cd "${LEDE_DIR}"
+
+          echo
+          echo "=================================================="
+          echo "mac80211 wireless scripts"
+          echo "=================================================="
+
+          find package/kernel/mac80211 \
+            -type f \
+            \( -name "*.sh" -o -name "*.uc" \) \
+            | sort \
+            | head -300
+
+          echo
+          echo "=================================================="
+          echo "搜索 netifd-wireless.sh 引用"
+          echo "=================================================="
+
+          grep -Rni \
+            "netifd-wireless.sh" \
+            package/kernel/mac80211 \
+            || true
+
+      # ==========================================================
+      # 11. 全源码搜索 wifi-scripts 依赖
+      # ==========================================================
+      - name: "🔎 搜索 wifi-scripts 依赖关系"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          cd "${LEDE_DIR}"
+
+          echo
+          echo "=================================================="
+          echo "搜索 +wifi-scripts"
+          echo "=================================================="
+
+          grep -Rni \
+            "+wifi-scripts" \
+            package/network \
+            package/kernel \
+            2>/dev/null \
             | head -300 \
             || true
 
+          echo
+          echo "=================================================="
+          echo "搜索 PACKAGE_WIFI_SCRIPTS"
+          echo "=================================================="
 
-      # ==========================================================
-      # 10. 最重要：模拟 wifi-scripts 安装
-      # ==========================================================
-      - name: "🧪 分析 wifi-scripts 安装目标"
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-
-          cd lede
-
-          echo "=========================================="
-          echo "寻找 INSTALL / CP / netifd-wireless.sh"
-          echo "=========================================="
-
-          grep -R \
-            -n \
-            --exclude-dir=.git \
-            -E \
-            'netifd-wireless\.sh|lib/netifd|Package/wifi-scripts|wifi-scripts' \
+          grep -Rni \
+            "PACKAGE_wifi-scripts\|CONFIG_PACKAGE_wifi-scripts" \
             package \
             2>/dev/null \
-            | head -500 || true
-
+            | head -300 \
+            || true
 
       # ==========================================================
-      # 11. 汇总
+      # 12. 搜索 netifd-wireless.sh 全源码引用
       # ==========================================================
-      - name: "📋 最终诊断摘要"
+      - name: "🔍 全源码搜索 netifd-wireless.sh"
         shell: bash
         run: |
           set -Eeuo pipefail
 
-          cd lede
+          cd "${LEDE_DIR}"
 
           echo
-          echo "============================================================"
-          echo "                 NETIFD WIFI 最终诊断"
-          echo "============================================================"
+          echo "=================================================="
+          echo "全源码 netifd-wireless.sh"
+          echo "=================================================="
+
+          grep -Rni \
+            "netifd-wireless.sh" \
+            package \
+            target \
+            2>/dev/null \
+            | head -500 \
+            || true
+
+      # ==========================================================
+      # 13. 检查 wifi-scripts 是否已经进入 staging
+      # ==========================================================
+      - name: "📦 检查 staging / build_dir"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          cd "${LEDE_DIR}"
 
           echo
-          echo "[LEDE COMMIT]"
-          git log -1 --oneline
+          echo "=================================================="
+          echo "build_dir 中的 wifi-scripts"
+          echo "=================================================="
+
+          find build_dir \
+            -type f \
+            -path "*wifi-scripts*" \
+            2>/dev/null \
+            | head -200 \
+            || true
 
           echo
-          echo "[netifd-wireless.sh]"
-          if find . -type f -name 'netifd-wireless.sh' | grep -q .; then
-            find . -type f -name 'netifd-wireless.sh'
+          echo "=================================================="
+          echo "staging_dir 中的 netifd-wireless.sh"
+          echo "=================================================="
+
+          find staging_dir \
+            -type f \
+            -name "netifd-wireless.sh" \
+            2>/dev/null \
+            | head -100 \
+            || true
+
+      # ==========================================================
+      # 14. 检查当前配置是否启用 wifi-scripts
+      # ==========================================================
+      - name: "📋 最终角色判断"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          cd "${LEDE_DIR}"
+
+          echo
+          echo "=================================================="
+          echo "最终诊断结果"
+          echo "=================================================="
+
+          echo
+          echo "[1] wifi-scripts package:"
+          if [ -d package/network/config/wifi-scripts ]; then
+            echo "YES"
           else
-            echo "❌ 当前源码没有 netifd-wireless.sh"
+            echo "NO"
           fi
 
           echo
-          echo "[wifi-scripts]"
-          if find package -type d -name 'wifi-scripts' | grep -q .; then
-            find package -type d -name 'wifi-scripts'
+          echo "[2] wifi-scripts Makefile:"
+          if [ -f package/network/config/wifi-scripts/Makefile ]; then
+            echo "YES"
           else
-            echo "❌ 当前源码没有 wifi-scripts 目录"
+            echo "NO"
           fi
 
           echo
-          echo "[netifd]"
-          find package \
-            -type d \
-            -name 'netifd' \
-            -print \
-            | sort || true
+          echo "[3] wifi-scripts 是否包含 netifd-wireless.sh:"
+          if grep -Rqs \
+            "netifd-wireless.sh" \
+            package/network/config/wifi-scripts 2>/dev/null; then
+            echo "YES"
+          else
+            echo "NO"
+          fi
 
           echo
-          echo "============================================================"
-          echo "如果这里显示："
-          echo "1. wifi-scripts 存在"
-          echo "2. netifd-wireless.sh 不存在"
-          echo "3. CONFIG_PACKAGE_wifi-scripts 仍存在"
+          echo "[4] netifd Makefile 是否安装 netifd-wireless.sh:"
+          if grep -qs \
+            "netifd-wireless.sh" \
+            package/network/config/netifd/Makefile 2>/dev/null; then
+            echo "YES"
+          else
+            echo "NO"
+          fi
+
           echo
-          echo "那么就基本可以确认："
-          echo "当前 LEDE 的 wifi-scripts/netifd 已发生脚本架构变化，"
-          echo "而你的 WH3000 Pro 启动逻辑仍依赖旧版 netifd-wireless.sh。"
-          echo "============================================================"
+          echo "[5] 当前 .config 是否启用 wifi-scripts:"
+          if grep -q \
+            '^CONFIG_PACKAGE_wifi-scripts=y' \
+            .config; then
+            echo "YES"
+          else
+            echo "NO"
+          fi
+
+          echo
+          echo "[6] 当前 .config 是否启用 netifd:"
+          if grep -q \
+            '^CONFIG_PACKAGE_netifd=y' \
+            .config; then
+            echo "YES"
+          else
+            echo "NO"
+          fi
+
+          echo
+          echo "[7] mac80211/cfg80211 是否引用 wifi-scripts:"
+          if grep -Rqs \
+            "+wifi-scripts" \
+            package/kernel/mac80211 \
+            package/network/config \
+            2>/dev/null; then
+            echo "YES"
+          else
+            echo "NO"
+          fi
+
+          echo
+          echo "=================================================="
+          echo "不会执行 make package/.../compile"
+          echo "不会触发 toolchain 编译"
+          echo "=================================================="
+
+          echo
+          echo "✅ 角色确认诊断完成"
