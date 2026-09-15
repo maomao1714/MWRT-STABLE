@@ -76,7 +76,7 @@ jobs:
             ack antlr3 asciidoc autoconf automake autopoint binutils bison \
             build-essential bzip2 ccache cmake cpio curl device-tree-compiler \
             fastjar flex gawk gettext gcc-multilib g++-multilib git \
-            gnutls-dev help2man intltool lib32gcc-dev libc6-dev-i386 \
+            gnutls-dev help2man intltool libc6-dev-i386 \
             libelf-dev libffi-dev libglib2.0-dev libncurses5-dev \
             libncursesw5-dev libpcre3-dev libpython3-dev libreadline-dev \
             libssl-dev libtool libtool-bin libxml-parser-perl libyaml-dev \
