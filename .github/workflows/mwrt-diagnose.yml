@@ -1,5 +1,4 @@
 name: "🔬 MWRT-STABLE 配置根因诊断"
-
 on:
   workflow_dispatch:
     inputs:
