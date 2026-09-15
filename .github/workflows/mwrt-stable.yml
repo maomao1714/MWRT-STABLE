@@ -576,7 +576,7 @@ jobs:
           echo "✅ DIY1 执行完成"
 
 
-      # ==========================================================
+            # ==========================================================
       # 13. 更新并安装 feeds
       # ==========================================================
       - name: "📡 更新并安装 feeds"
@@ -586,16 +586,112 @@ jobs:
 
           cd "${LEDE_DIR}"
 
+          echo "=========================================="
+          echo "📡 更新并安装 feeds"
+          echo "=========================================="
+
+          # ------------------------------------------------------
+          # 关键修复
+          #
+          # scripts/feeds update 会自动执行 refresh_config()
+          # / make defconfig。
+          #
+          # 此时如果 .config 已经存在，而 feeds 尚未全部准备好，
+          # Docker / Lucky / Design / QModem 等 feed 包配置可能
+          # 被 Kconfig 当成不存在项目而清掉。
+          #
+          # 因此：
+          #   1. 暂时保存设备完整 .config
+          #   2. 删除工作中的 .config
+          #   3. 完成全部 feeds update / install
+          #   4. 恢复设备完整 .config
+          #
+          # 这样不会改变原始设备配置内容。
+          # ------------------------------------------------------
+
+          if [ ! -f .config ]; then
+            echo "❌ 找不到当前设备 .config"
+            exit 1
+          fi
+
+          cp .config .config.device
+
+          echo
+          echo "===== 暂存设备配置 ====="
+          echo "设备配置：.config.device"
+
+          rm -f .config
+
+          echo
+          echo "===== 更新全部 feeds ====="
+
           ./scripts/feeds update -a
+
+          echo
+          echo "===== 安装全部 feeds ====="
+
           ./scripts/feeds install -a
 
           # ------------------------------------------------------
           # QModem 官方 feed 再单独确认一次
           # ------------------------------------------------------
+
+          echo
+          echo "===== 更新 QModem feed ====="
+
           ./scripts/feeds update qmodem
+
+          echo
+          echo "===== 安装 QModem ====="
+
           ./scripts/feeds install -a -p qmodem
 
+          # ------------------------------------------------------
+          # 所有 feeds 完成后恢复设备配置
+          # ------------------------------------------------------
+
+          if [ ! -f .config.device ]; then
+            echo "❌ .config.device 不存在"
+            exit 1
+          fi
+
+          mv .config.device .config
+
+          echo
+          echo "=========================================="
+          echo "📦 feeds 完成后恢复设备配置"
+          echo "=========================================="
+
+          echo
+          echo "===== TARGET ====="
+          grep '^CONFIG_TARGET_' .config || true
+
+          echo
+          echo "===== Design / Docker / Lucky ====="
+          grep -E \
+            '^CONFIG_PACKAGE_(luci-theme-design|luci-app-design-config|docker|dockerd|containerd|luci-app-dockerman|lucky|luci-app-lucky)=' \
+            .config \
+            || true
+
+          echo
+          echo "===== Wi-Fi ====="
+          grep -E \
+            '^CONFIG_PACKAGE_(kmod-mt7915e|kmod-mt7981-firmware|mt7981-wo-firmware)=' \
+            .config \
+            || true
+
+          echo
+          echo "===== QModem ====="
+          grep -E \
+            '^CONFIG_PACKAGE_(qmodem|luci-app-qmodem-next|sms-forwarder-next|sms-forwarder-next|quectel-CM-5G-M)=' \
+            .config \
+            || true
+
+          echo
+          echo "=========================================="
           echo "✅ feeds 更新完成"
+          echo "✅ 设备 .config 已恢复"
+          echo "=========================================="
 
 
       # ==========================================================
