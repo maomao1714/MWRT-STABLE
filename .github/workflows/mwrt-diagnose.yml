@@ -1,10 +1,9 @@
 name: "🔬 MWRT-STABLE 配置根因诊断"
-
 on:
-workflow_dispatch:
-inputs:
-device:
-description: "选择诊断设备"
+  workflow_dispatch:
+    inputs:
+      device:
+        description: "选择诊断设备"
 required: true
 type: choice
 options:
@@ -129,10 +128,10 @@ steps:
       echo "Device : ${{ inputs.device }}"
       echo "Kernel : ${{ inputs.kernel }}"
       echo "Config : ${CONFIG_FILE}"
-- name: "📦 [01] 加载设备 .config"
-  shell: bash
-  run: |
-  set -Eeuo pipefail
+  - name: "📦 [01] 加载设备 .config"
+    shell: bash
+    run: |
+   set -Eeuo pipefail
   
       cd "${LEDE_DIR}"
 
