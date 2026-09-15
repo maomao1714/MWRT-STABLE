@@ -1,4 +1,4 @@
-name: MWRT Feeds 精确测试
+name: MWRT Feed最终定位测试
 
 on:
   workflow_dispatch:
@@ -10,7 +10,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Feeds 精确测试
+      - name: Feed逐个定位
         run: |
           sudo apt-get update
           sudo apt-get install -y git build-essential gawk gettext libncurses5-dev libssl-dev rsync unzip python3-distutils
@@ -21,77 +21,115 @@ jobs:
 
           cp ../wh3000pro.config .config
 
-          mkdir -p .diag
-
-          echo "================================"
-          echo "① 原始配置"
-          echo "================================"
-
-          cp .config .diag/0-original
-
-          grep -E '^CONFIG_PACKAGE_(luci-theme-design|luci-app-design-config|docker|dockerd|containerd|luci-app-dockerman|lucky|luci-app-lucky|kmod-mt7915e|kmod-mt7981-firmware|mt7981-wo-firmware|qmodem|luci-app-qmodem-next)=' .config || true
-
-          echo "================================"
-          echo "② DIY1"
-          echo "================================"
-
           bash ../diy-part1.sh || true
 
-          cp .config .diag/1-diy1
+          echo
+          echo "========================================"
+          echo "初始状态"
+          echo "========================================"
 
-          grep -E '^CONFIG_PACKAGE_(luci-theme-design|luci-app-design-config|docker|dockerd|containerd|luci-app-dockerman|lucky|luci-app-lucky|kmod-mt7915e|kmod-mt7981-firmware|mt7981-wo-firmware|qmodem|luci-app-qmodem-next)=' .config || true
-
-          echo "================================"
-          echo "③ 只执行 feeds update -a"
-          echo "================================"
-
-          ./scripts/feeds update -a || true
-
-          cp .config .diag/2-update
-
-          grep -E '^CONFIG_PACKAGE_(luci-theme-design|luci-app-design-config|docker|dockerd|containerd|luci-app-dockerman|lucky|luci-app-lucky|kmod-mt7915e|kmod-mt7981-firmware|mt7981-wo-firmware|qmodem|luci-app-qmodem-next)=' .config || true
-
-          echo "================================"
-          echo "④ 只执行 feeds install -a"
-          echo "================================"
-
-          ./scripts/feeds install -a || true
-
-          cp .config .diag/3-install
-
-          grep -E '^CONFIG_PACKAGE_(luci-theme-design|luci-app-design-config|docker|dockerd|containerd|luci-app-dockerman|lucky|luci-app-lucky|kmod-mt7915e|kmod-mt7981-firmware|mt7981-wo-firmware|qmodem|luci-app-qmodem-next)=' .config || true
-
-          echo "================================"
-          echo "⑤ 只执行 qmodem update"
-          echo "================================"
-
-          ./scripts/feeds update qmodem || true
-
-          cp .config .diag/4-qmodem-update
-
-          grep -E '^CONFIG_PACKAGE_(luci-theme-design|luci-app-design-config|docker|dockerd|containerd|luci-app-dockerman|lucky|luci-app-lucky|kmod-mt7915e|kmod-mt7981-firmware|mt7981-wo-firmware|qmodem|luci-app-qmodem-next)=' .config || true
-
-          echo "================================"
-          echo "⑥ 只执行 qmodem install"
-          echo "================================"
-
-          ./scripts/feeds install -a -p qmodem || true
-
-          cp .config .diag/5-qmodem-install
-
-          grep -E '^CONFIG_PACKAGE_(luci-theme-design|luci-app-design-config|docker|dockerd|containerd|luci-app-dockerman|lucky|luci-app-lucky|kmod-mt7915e|kmod-mt7981-firmware|mt7981-wo-firmware|qmodem|luci-app-qmodem-next)=' .config || true
-
-          echo "================================"
-          echo "最终对比"
-          echo "================================"
-
-          for f in .diag/*; do
+          check_config() {
             echo
-            echo "---------- $f ----------"
-            grep -E '^CONFIG_PACKAGE_(luci-theme-design|luci-app-design-config|docker|dockerd|containerd|luci-app-dockerman|lucky|luci-app-lucky|kmod-mt7915e|kmod-mt7981-firmware|mt7981-wo-firmware|qmodem|luci-app-qmodem-next)=' "$f" || true
-          done
+            echo "----- 当前配置 -----"
+
+            for x in \
+              luci-theme-design \
+              luci-app-design-config \
+              docker \
+              dockerd \
+              containerd \
+              luci-app-dockerman \
+              lucky \
+              luci-app-lucky \
+              kmod-mt7915e \
+              kmod-mt7981-firmware \
+              mt7981-wo-firmware \
+              qmodem \
+              luci-app-qmodem-next
+            do
+              if grep -q "^CONFIG_PACKAGE_${x}=y$" .config; then
+                echo "OK      $x"
+              else
+                echo "MISSING $x"
+              fi
+            done
+          }
+
+          check_config
 
           echo
-          echo "================================"
-          echo "测试完成"
-          echo "================================"
+          echo "========================================"
+          echo "① packages"
+          echo "========================================"
+
+          ./scripts/feeds update packages
+
+          check_config
+
+          echo
+          echo "========================================"
+          echo "② luci"
+          echo "========================================"
+
+          ./scripts/feeds update luci
+
+          check_config
+
+          echo
+          echo "========================================"
+          echo "③ routing"
+          echo "========================================"
+
+          ./scripts/feeds update routing
+
+          check_config
+
+          echo
+          echo "========================================"
+          echo "④ telephony"
+          echo "========================================"
+
+          ./scripts/feeds update telephony
+
+          check_config
+
+          echo
+          echo "========================================"
+          echo "⑤ helloworld"
+          echo "========================================"
+
+          ./scripts/feeds update helloworld
+
+          check_config
+
+          echo
+          echo "========================================"
+          echo "⑥ lucky"
+          echo "========================================"
+
+          ./scripts/feeds update lucky
+
+          check_config
+
+          echo
+          echo "========================================"
+          echo "⑦ qmodem"
+          echo "========================================"
+
+          ./scripts/feeds update qmodem
+
+          check_config
+
+          echo
+          echo "========================================"
+          echo "⑧ rtp2httpd"
+          echo "========================================"
+
+          ./scripts/feeds update rtp2httpd
+
+          check_config
+
+          echo
+          echo "========================================"
+          echo "最终测试结束"
+          echo "========================================"
