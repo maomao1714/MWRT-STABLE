@@ -1,0 +1,621 @@
+name: 🔎 WH3000 Pro Wi-Fi 源码缺失追踪
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  trace:
+    name: 🔎 追踪 WH3000 Pro Wi-Fi 源码
+    runs-on: ubuntu-22.04
+
+    steps:
+
+      # ==========================================================
+      # 1. 准备环境
+      # ==========================================================
+      - name: "📦 准备工具"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          sudo apt-get update
+          sudo apt-get install -y \
+            git \
+            grep \
+            sed \
+            awk \
+            diffutils \
+            findutils \
+            tree
+
+      # ==========================================================
+      # 2. 下载完整 LEDE Git 历史
+      # ==========================================================
+      - name: "📥 下载 LEDE 完整源码历史"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          git clone \
+            --no-tags \
+            https://github.com/coolsnowwolf/lede.git \
+            lede
+
+          cd lede
+
+          echo "=========================================="
+          echo "当前提交"
+          echo "=========================================="
+
+          git log -1 --oneline --decorate
+
+          echo
+          echo "=========================================="
+          echo "当前分支"
+          echo "=========================================="
+
+          git branch -a
+
+      # ==========================================================
+      # 3. 当前 WH3000 Pro DTS
+      # ==========================================================
+      - name: "📡 检查 WH3000 Pro DTS"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          cd lede
+
+          echo "=========================================="
+          echo "WH3000 Pro DTS"
+          echo "=========================================="
+
+          DTS="target/linux/mediatek/dts/mt7981b-huasifei-wh3000-pro.dts"
+
+          if [ -f "${DTS}" ]; then
+            echo "✅ 找到：${DTS}"
+            echo
+
+            cat "${DTS}"
+
+            echo
+            echo "=========================================="
+            echo "Wi-Fi / PCIe / EEPROM 相关内容"
+            echo "=========================================="
+
+            grep -nEi \
+              'wifi|pcie|mt7915|eeprom|factory|nvmem|firmware|reset-gpios|interrupt' \
+              "${DTS}" \
+              || true
+
+          else
+            echo "❌ 当前源码没有找到：${DTS}"
+          fi
+
+      # ==========================================================
+      # 4. WH3000 与 WH3000 Pro DTS 对比
+      # ==========================================================
+      - name: "🔬 对比 WH3000 与 WH3000 Pro DTS"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          cd lede
+
+          echo "=========================================="
+          echo "WH3000 / WH3000 Pro DTS"
+          echo "=========================================="
+
+          find target/linux/mediatek/dts \
+            -type f \
+            \( \
+              -iname '*wh3000*' \
+              -o -iname '*huasifei*' \
+            \) \
+            -print \
+            | sort
+
+          echo
+          echo "=========================================="
+          echo "WH3000 Pro DTS"
+          echo "=========================================="
+
+          find target/linux/mediatek/dts \
+            -type f \
+            -iname '*wh3000*pro*' \
+            -print \
+            | sort
+
+          echo
+          echo "=========================================="
+          echo "WH3000 DTS"
+          echo "=========================================="
+
+          find target/linux/mediatek/dts \
+            -type f \
+            -iname '*wh3000*' \
+            ! -iname '*pro*' \
+            -print \
+            | sort
+
+      # ==========================================================
+      # 5. 全源码搜索 MT7981 + MT7915 + PCIe
+      # ==========================================================
+      - name: "🔍 搜索 MT7981 / MT7915 / PCIe Wi-Fi"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          cd lede
+
+          echo "=========================================="
+          echo "MT7915 相关源码"
+          echo "=========================================="
+
+          grep -RIl \
+            --exclude-dir=.git \
+            -E 'mt7915|MT7915' \
+            target/linux package \
+            2>/dev/null \
+            | sort \
+            | head -300 \
+            || true
+
+          echo
+          echo "=========================================="
+          echo "wifi@0,0"
+          echo "=========================================="
+
+          grep -RIn \
+            --exclude-dir=.git \
+            'wifi@0,0' \
+            target/linux/mediatek \
+            2>/dev/null \
+            | head -300 \
+            || true
+
+          echo
+          echo "=========================================="
+          echo "mediatek,mtd-eeprom"
+          echo "=========================================="
+
+          grep -RIn \
+            --exclude-dir=.git \
+            'mediatek,mtd-eeprom' \
+            target/linux/mediatek \
+            2>/dev/null \
+            | head -300 \
+            || true
+
+          echo
+          echo "=========================================="
+          echo "&pcie0 / &pcie1"
+          echo "=========================================="
+
+          grep -RIn \
+            --exclude-dir=.git \
+            -E '^&pcie0|^&pcie1|^&pcie[[:space:]]*\{' \
+            target/linux/mediatek/dts \
+            2>/dev/null \
+            | head -300 \
+            || true
+
+      # ==========================================================
+      # 6. 找出带 MT7915 PCIe Wi-Fi 的 MT7981 DTS
+      # ==========================================================
+      - name: "🎯 寻找可参考的 MT7981 + MT7915 DTS"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          cd lede
+
+          echo "=========================================="
+          echo "寻找 MT7981 + MT7915 PCIe DTS"
+          echo "=========================================="
+
+          while IFS= read -r file; do
+
+            if grep -qEi 'mt7915|wifi@0,0|mediatek,mtd-eeprom' "${file}" 2>/dev/null; then
+
+              echo
+              echo "------------------------------------------"
+              echo "候选 DTS：${file}"
+              echo "------------------------------------------"
+
+              grep -nEi \
+                'pcie|wifi@0,0|mt7915|mediatek,mtd-eeprom|eeprom|factory|reset-gpios|interrupt' \
+                "${file}" \
+                || true
+
+            fi
+
+          done < <(
+            find target/linux/mediatek/dts \
+              -type f \
+              \( -name '*.dts' -o -name '*.dtsi' \) \
+              | sort
+          )
+
+      # ==========================================================
+      # 7. 检查 Wi-Fi 驱动源码
+      # ==========================================================
+      - name: "🧩 检查 MT76 / MT7915 驱动"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          cd lede
+
+          echo "=========================================="
+          echo "MT76 目录"
+          echo "=========================================="
+
+          find package target \
+            -type d \
+            -iname '*mt76*' \
+            -print \
+            2>/dev/null \
+            | sort
+
+          echo
+          echo "=========================================="
+          echo "MT7915 驱动文件"
+          echo "=========================================="
+
+          find package target \
+            -type f \
+            \( \
+              -iname '*mt7915*' \
+              -o -iname '*mt76*' \
+            \) \
+            -print \
+            2>/dev/null \
+            | sort \
+            | head -500
+
+          echo
+          echo "=========================================="
+          echo "MT7915 Makefile / Kconfig"
+          echo "=========================================="
+
+          grep -RIn \
+            --exclude-dir=.git \
+            -E 'mt7915|CONFIG_MT7915|MT7915' \
+            package/kernel/mt76 \
+            2>/dev/null \
+            | head -300 \
+            || true
+
+      # ==========================================================
+      # 8. 检查 Wi-Fi firmware
+      # ==========================================================
+      - name: "📦 检查 Wi-Fi firmware"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          cd lede
+
+          echo "=========================================="
+          echo "MT7915 firmware"
+          echo "=========================================="
+
+          find . \
+            -type f \
+            ! -path './.git/*' \
+            \( \
+              -iname '*mt7915*' \
+              -o -iname '*mt7981*firmware*' \
+            \) \
+            -print \
+            2>/dev/null \
+            | sort \
+            | head -500
+
+          echo
+          echo "=========================================="
+          echo "firmware Makefile"
+          echo "=========================================="
+
+          grep -RIn \
+            --exclude-dir=.git \
+            -E 'mt7915|mt7981' \
+            package/firmware \
+            package/kernel/mt76 \
+            2>/dev/null \
+            | head -500 \
+            || true
+
+      # ==========================================================
+      # 9. 检查 wifi-scripts / netifd
+      # ==========================================================
+      - name: "📡 检查无线脚本"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          cd lede
+
+          echo "=========================================="
+          echo "wifi-scripts"
+          echo "=========================================="
+
+          find . \
+            -type f \
+            ! -path './.git/*' \
+            \( \
+              -iname '*wifi*script*' \
+              -o -iname 'netifd-wireless.sh' \
+              -o -iname '*wireless*.sh' \
+            \) \
+            -print \
+            2>/dev/null \
+            | sort \
+            | head -500
+
+          echo
+          echo "=========================================="
+          echo "netifd wireless"
+          echo "=========================================="
+
+          find package target \
+            -type f \
+            ! -path '*/.git/*' \
+            | grep -Ei \
+              'netifd|wireless|wifi' \
+            | head -500 \
+            || true
+
+      # ==========================================================
+      # 10. 最重要：寻找历史上删除的 Wi-Fi 文件
+      # ==========================================================
+      - name: "🕵️ 追踪历史删除的 Wi-Fi 文件"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          cd lede
+
+          echo "=========================================="
+          echo "历史删除文件：WH3000 / Huasifei"
+          echo "=========================================="
+
+          git log \
+            --all \
+            --diff-filter=D \
+            --summary \
+            -- \
+              'target/linux/mediatek/*' \
+              'package/kernel/mt76/*' \
+              'package/firmware/*' \
+              | grep -Ei \
+                'delete mode|wh3000|huasifei|mt7915|mt7981|wifi|wireless|eeprom|firmware|pcie' \
+              | head -500 \
+              || true
+
+          echo
+          echo "=========================================="
+          echo "历史删除 DTS"
+          echo "=========================================="
+
+          git log \
+            --all \
+            --diff-filter=D \
+            --name-status \
+            -- \
+              'target/linux/mediatek/dts/*' \
+            | grep -Ei \
+              'wh3000|huasifei|mt7981|mt7915|wifi' \
+            | head -500 \
+            || true
+
+      # ==========================================================
+      # 11. 追踪 WH3000 Pro DTS 历史
+      # ==========================================================
+      - name: "📜 追踪 WH3000 Pro DTS Git 历史"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          cd lede
+
+          DTS="target/linux/mediatek/dts/mt7981b-huasifei-wh3000-pro.dts"
+
+          echo "=========================================="
+          echo "WH3000 Pro DTS Git 历史"
+          echo "=========================================="
+
+          git log \
+            --follow \
+            --date=short \
+            --format='%h %ad %s' \
+            -- \
+            "${DTS}" \
+            | head -100 \
+            || true
+
+          echo
+          echo "=========================================="
+          echo "WH3000 Pro DTS blame"
+          echo "=========================================="
+
+          if [ -f "${DTS}" ]; then
+            git blame \
+              -L 1,240 \
+              "${DTS}" \
+              | grep -Ei \
+                'wifi|pcie|mt7915|eeprom|factory|nvmem|firmware|reset' \
+              || true
+          fi
+
+      # ==========================================================
+      # 12. 搜索 WH3000 Pro 相关提交
+      # ==========================================================
+      - name: "🔎 搜索 WH3000 Pro Wi-Fi 相关提交"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          cd lede
+
+          echo "=========================================="
+          echo "Git 提交关键词搜索"
+          echo "=========================================="
+
+          git log \
+            --all \
+            --oneline \
+            --decorate \
+            --regexp-ignore-case \
+            --grep='wh3000\|huasifei\|mt7915\|mt7981.*wifi\|wifi.*mt7981\|wifi.*pcie\|eeprom' \
+            | head -300 \
+            || true
+
+      # ==========================================================
+      # 13. 查找历史版本中的 WH3000 Pro DTS
+      # ==========================================================
+      - name: "🧬 检查 WH3000 Pro DTS 历史版本"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          cd lede
+
+          DTS="target/linux/mediatek/dts/mt7981b-huasifei-wh3000-pro.dts"
+
+          echo "=========================================="
+          echo "历史版本中的 WH3000 Pro DTS"
+          echo "=========================================="
+
+          COMMITS=$(git log \
+            --follow \
+            --format='%H' \
+            -- \
+            "${DTS}" \
+            | head -20)
+
+          for commit in ${COMMITS}; do
+
+            echo
+            echo "##########################################"
+            echo "COMMIT: ${commit}"
+            echo "##########################################"
+
+            git show "${commit}:${DTS}" \
+              2>/dev/null \
+              | grep -nEi \
+                'wifi|pcie|mt7915|eeprom|factory|nvmem|firmware|reset-gpios|interrupt' \
+              || true
+
+          done
+
+      # ==========================================================
+      # 14. 检查当前源码中是否存在疑似被遗漏的文件
+      # ==========================================================
+      - name: "🚨 汇总疑似缺失文件"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          cd lede
+
+          echo "=========================================="
+          echo "疑似 Wi-Fi 缺失文件汇总"
+          echo "=========================================="
+
+          echo
+          echo "[1] 当前 WH3000 Pro DTS"
+          test -f \
+            target/linux/mediatek/dts/mt7981b-huasifei-wh3000-pro.dts \
+            && echo "存在" \
+            || echo "不存在"
+
+          echo
+          echo "[2] MT76"
+          find package/kernel \
+            -maxdepth 2 \
+            -type d \
+            -iname '*mt76*' \
+            -print \
+            2>/dev/null \
+            || true
+
+          echo
+          echo "[3] MT7915"
+          find . \
+            -type f \
+            ! -path './.git/*' \
+            -iname '*mt7915*' \
+            -print \
+            2>/dev/null \
+            | head -100 \
+            || true
+
+          echo
+          echo "[4] Wi-Fi DTS"
+          grep -RIl \
+            --exclude-dir=.git \
+            -E 'wifi@0,0|mediatek,mtd-eeprom|mt7915' \
+            target/linux/mediatek/dts \
+            2>/dev/null \
+            | sort \
+            | head -100 \
+            || true
+
+          echo
+          echo "[5] Git 历史删除文件"
+          git log \
+            --all \
+            --diff-filter=D \
+            --name-only \
+            -- \
+              target/linux/mediatek \
+              package/kernel/mt76 \
+              package/firmware \
+            | grep -Ei \
+              'wifi|wireless|mt7915|mt7981|huasifei|wh3000|eeprom|pcie|firmware' \
+            | sort -u \
+            | head -300 \
+            || true
+
+      # ==========================================================
+      # 15. 最终输出当前源码版本
+      # ==========================================================
+      - name: "📋 输出最终诊断信息"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          cd lede
+
+          echo "=========================================="
+          echo "LEDE 当前源码信息"
+          echo "=========================================="
+
+          git log -1 \
+            --format='Commit: %H%nDate: %ad%nSubject: %s' \
+            --date=iso
+
+          echo
+          echo "=========================================="
+          echo "WH3000 Pro DTS"
+          echo "=========================================="
+
+          sha256sum \
+            target/linux/mediatek/dts/mt7981b-huasifei-wh3000-pro.dts \
+            2>/dev/null \
+            || true
+
+          echo
+          echo "=========================================="
+          echo "诊断完成"
+          echo "=========================================="
+
+          echo "⚠️ 本工作流没有编译固件"
+          echo "⚠️ 没有修改任何源码"
+          echo "⚠️ 没有修改 .config"
+          echo "⚠️ 目的只有一个：寻找 Wi-Fi 源码缺失/历史变化"
