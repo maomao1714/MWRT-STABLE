@@ -589,6 +589,12 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
+          # ------------------------------------------------------
+          # QModem 官方 feed 再单独确认一次
+          # ------------------------------------------------------
+          ./scripts/feeds update qmodem
+          ./scripts/feeds install -a -p qmodem
+
           echo "✅ feeds 更新完成"
 
 
@@ -642,8 +648,9 @@ jobs:
           # 检查 QModem 包
           # ------------------------------------------------------
 
-          find_pkg() {
-            grep -Rqs "^Package: $1$" \
+                    find_pkg() {
+            grep -RqsE \
+              "^[[:space:]]*define[[:space:]]+(Package|KernelPackage)/$1([[:space:]]|$)" \
               package \
               feeds \
               --include='Makefile' \
@@ -711,8 +718,9 @@ jobs:
           echo "📶 通用 WWAN / 4G / 5G 驱动"
           echo "=========================================="
 
-          find_pkg() {
-            grep -Rqs "^Package: $1$" \
+                    find_pkg() {
+            grep -RqsE \
+              "^[[:space:]]*define[[:space:]]+(Package|KernelPackage)/$1([[:space:]]|$)" \
               package \
               feeds \
               --include='Makefile' \
