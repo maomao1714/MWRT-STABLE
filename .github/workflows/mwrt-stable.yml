@@ -613,7 +613,7 @@ jobs:
           bash "${GITHUB_WORKSPACE}/diy-part2.sh"
 
           echo "✅ DIY2 执行完成"
-                # ==========================================================
+      # ==========================================================
       # 15. 配置 QModem
       # ==========================================================
       - name: "📶 配置 QModem"
@@ -630,7 +630,6 @@ jobs:
           # ------------------------------------------------------
           # 清理旧版 QModem
           # ------------------------------------------------------
-
           sed -i \
             -e '/^CONFIG_PACKAGE_luci-app-qmodem=/d' \
             -e '/^CONFIG_PACKAGE_luci-app-qmodem-sms=/d' \
@@ -645,44 +644,98 @@ jobs:
             .config
 
           # ------------------------------------------------------
-          # 检查 QModem 包
+          # 检查 QModem feed
+          #
+          # 不再使用：
+          #   grep "^Package: qmodem$"
+          #
+          # 因为 QModem Makefile 使用：
+          #   PKG_NAME:=qmodem
+          #
           # ------------------------------------------------------
 
-                    find_pkg() {
-            grep -RqsE \
-              "^[[:space:]]*define[[:space:]]+(Package|KernelPackage)/$1([[:space:]]|$)" \
-              package \
-              feeds \
-              --include='Makefile' \
-              --include='*.mk' \
-              2>/dev/null
-          }
+          echo
+          echo "===== QModem Feed 检查 ====="
 
-          for pkg in \
-            qmodem \
-            luci-app-qmodem-next
-          do
+          echo
+          echo "--- feeds.conf.default ---"
+          grep -n "qmodem" feeds.conf.default || true
 
-            if find_pkg "${pkg}"; then
+          echo
+          echo "--- feeds/qmodem ---"
 
-              echo "✅ 找到 QModem 包：${pkg}"
+          if [ ! -d "feeds/qmodem" ]; then
+            echo "❌ feeds/qmodem 不存在"
+            echo
+            echo "当前 feeds："
+            ls -la feeds || true
+            exit 1
+          fi
 
-            else
+          echo "✅ feeds/qmodem 存在"
 
-              echo "❌ 找不到 QModem 包：${pkg}"
-              exit 1
+          echo
+          echo "--- QModem Makefile ---"
 
-            fi
+          QMODEM_FILES="$(find feeds/qmodem \
+            -type f \
+            -name Makefile \
+            2>/dev/null || true)"
 
-          done
+          if [ -z "${QMODEM_FILES}" ]; then
+            echo "❌ feeds/qmodem 中没有找到 Makefile"
+            exit 1
+          fi
+
+          echo "${QMODEM_FILES}" | head -100
+
+          echo
+          echo "--- QModem Package 定义 ---"
+
+          grep -RnsE \
+            '^[[:space:]]*PKG_NAME[[:space:]]*:=[[:space:]]*qmodem[[:space:]]*$|^[[:space:]]*define[[:space:]]+(Package|KernelPackage)/(qmodem|\$\(PKG_NAME\))([[:space:]]|$)' \
+            feeds/qmodem \
+            --include='Makefile' \
+            --include='*.mk' \
+            2>/dev/null \
+            | head -100 \
+            || true
+
+          echo
+          echo "--- 检查 qmodem ---"
+
+          if grep -RqsE \
+            '^[[:space:]]*PKG_NAME[[:space:]]*:=[[:space:]]*qmodem[[:space:]]*$|^[[:space:]]*define[[:space:]]+Package/(qmodem|\$\(PKG_NAME\))([[:space:]]|$)' \
+            feeds/qmodem \
+            --include='Makefile' \
+            --include='*.mk' \
+            2>/dev/null
+          then
+            echo "✅ 找到 QModem：qmodem"
+          else
+            echo "❌ QModem feed 中没有找到 qmodem"
+            exit 1
+          fi
+
+          echo
+          echo "--- 检查 luci-app-qmodem-next ---"
+
+          if grep -RqsE \
+            '^[[:space:]]*PKG_NAME[[:space:]]*:=[[:space:]]*luci-app-qmodem-next[[:space:]]*$|^[[:space:]]*define[[:space:]]+Package/luci-app-qmodem-next([[:space:]]|$)' \
+            feeds/qmodem \
+            --include='Makefile' \
+            --include='*.mk' \
+            2>/dev/null
+          then
+            echo "✅ 找到 QModem LuCI：luci-app-qmodem-next"
+          else
+            echo "❌ QModem feed 中没有找到 luci-app-qmodem-next"
+            exit 1
+          fi
 
           # ------------------------------------------------------
           # 写入 QModem
-          #
-          # 不再使用 heredoc
-          # 避免 GitHub Actions YAML 缩进错误
           # ------------------------------------------------------
-
           printf '%s\n' \
             'CONFIG_PACKAGE_qmodem=y' \
             'CONFIG_PACKAGE_luci-app-qmodem-next=y' \
@@ -703,6 +756,9 @@ jobs:
             .config \
             || true
 
+          echo
+          echo "✅ QModem 配置完成"
+
 
       # ==========================================================
       # 16. 配置通用 WWAN 驱动
@@ -718,9 +774,24 @@ jobs:
           echo "📶 通用 WWAN / 4G / 5G 驱动"
           echo "=========================================="
 
-                    find_pkg() {
+          # ------------------------------------------------------
+          # 查找 OpenWrt Package / KernelPackage
+          #
+          # 支持：
+          #   define Package/xxx
+          #   define KernelPackage/xxx
+          #   PKG_NAME:=xxx
+          #
+          # 对 kmod-xxx 自动同时检查：
+          #   kmod-xxx
+          #   xxx
+          # ------------------------------------------------------
+          find_pkg() {
+            local pkg="$1"
+            local name="${pkg#kmod-}"
+
             grep -RqsE \
-              "^[[:space:]]*define[[:space:]]+(Package|KernelPackage)/$1([[:space:]]|$)" \
+              "^[[:space:]]*PKG_NAME[[:space:]]*:=[[:space:]]*(${pkg}|${name})[[:space:]]*$|^[[:space:]]*define[[:space:]]+(Package|KernelPackage)/(${pkg}|${name})([[:space:]]|$)" \
               package \
               feeds \
               --include='Makefile' \
@@ -770,6 +841,15 @@ jobs:
             fi
 
           done
+
+          echo
+          echo "===== WWAN 最终配置 ====="
+
+          grep -E \
+            '^CONFIG_PACKAGE_(kmod-|ppp)' \
+            .config \
+            | sort \
+            || true
 
           echo
           echo "✅ WWAN 驱动配置完成"
