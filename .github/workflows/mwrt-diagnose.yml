@@ -1,135 +1,327 @@
-name: MWRT Feed最终定位测试
+name: MWRT WH3000 Pro Wi-Fi 源码诊断
 
 on:
   workflow_dispatch:
 
 jobs:
-  test:
+  wifi-diagnose:
     runs-on: ubuntu-22.04
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Feed逐个定位
+      - name: "🔍 WH3000 Pro Wi-Fi 源码诊断"
+        shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y git build-essential gawk gettext libncurses5-dev libssl-dev rsync unzip python3-distutils
+          set -u
 
-          git clone --depth=1 https://github.com/coolsnowwolf/lede.git lede
+          echo "=========================================="
+          echo "MWRT WH3000 Pro Wi-Fi 源码诊断"
+          echo "=========================================="
+
+          sudo apt-get update
+          sudo apt-get install -y \
+            git \
+            build-essential \
+            gawk \
+            gettext \
+            libncurses5-dev \
+            libssl-dev \
+            rsync \
+            unzip \
+            python3-distutils
+
+          echo
+          echo "=========================================="
+          echo "① 获取 LEDE"
+          echo "=========================================="
+
+          git clone --depth=1 \
+            https://github.com/coolsnowwolf/lede.git \
+            lede
 
           cd lede
 
+          echo
+          echo "=========================================="
+          echo "② 加载 WH3000 Pro 配置"
+          echo "=========================================="
+
           cp ../wh3000pro.config .config
+
+          echo
+          echo "===== TARGET ====="
+
+          grep -E \
+            '^CONFIG_TARGET_(mediatek|mediatek_filogic|mediatek_filogic_DEVICE_huasifei_wh3000-pro)=' \
+            .config || true
+
+          echo
+          echo "===== Wi-Fi CONFIG ====="
+
+          grep -E \
+            '^CONFIG_PACKAGE_(kmod-mac80211|kmod-cfg80211|kmod-mt76-core|kmod-mt76-connac|kmod-mt7915e|kmod-mt7981-firmware|mt7981-wo-firmware|wireless-regdb|iwinfo|rpcd-mod-iwinfo|wifi-scripts|wpad-openssl-mbedtls)=' \
+            .config || true
+
+          echo
+          echo "=========================================="
+          echo "③ 执行 DIY1"
+          echo "=========================================="
+
+          chmod +x ../diy-part1.sh
 
           bash ../diy-part1.sh || true
 
           echo
-          echo "========================================"
-          echo "初始状态"
-          echo "========================================"
+          echo "===== DIY1 后 Wi-Fi CONFIG ====="
 
-          check_config() {
+          grep -E \
+            '^CONFIG_PACKAGE_(kmod-mac80211|kmod-cfg80211|kmod-mt76-core|kmod-mt76-connac|kmod-mt7915e|kmod-mt7981-firmware|mt7981-wo-firmware|wireless-regdb|iwinfo|rpcd-mod-iwinfo|wifi-scripts|wpad-openssl-mbedtls)=' \
+            .config || true
+
+          echo
+          echo "=========================================="
+          echo "④ 更新并安装 feeds"
+          echo "=========================================="
+
+          rm -f .config.diag
+
+          cp .config .config.diag
+
+          rm -f .config
+
+          ./scripts/feeds update -a || true
+
+          ./scripts/feeds install -a || true
+
+          mv .config.diag .config
+
+          echo
+          echo "===== feeds 后恢复 Wi-Fi CONFIG ====="
+
+          grep -E \
+            '^CONFIG_PACKAGE_(kmod-mac80211|kmod-cfg80211|kmod-mt76-core|kmod-mt76-connac|kmod-mt7915e|kmod-mt7981-firmware|mt7981-wo-firmware|wireless-regdb|iwinfo|rpcd-mod-iwinfo|wifi-scripts|wpad-openssl-mbedtls)=' \
+            .config || true
+
+          echo
+          echo "=========================================="
+          echo "⑤ 搜索 WH3000 Pro DTS"
+          echo "=========================================="
+
+          echo
+          echo "===== huasifei 文件 ====="
+
+          find target/linux -type f \
+            \( -iname '*huasifei*' -o -iname '*wh3000*' \) \
+            -print 2>/dev/null || true
+
+          echo
+          echo "===== DTS 文件 ====="
+
+          find target/linux -type f \
+            \( -name '*.dts' -o -name '*.dtsi' \) \
+            | grep -Ei \
+              'huasifei|wh3000|7981|7988' \
+            | head -200 || true
+
+          echo
+          echo "=========================================="
+          echo "⑥ 搜索 MT7981 / MT7915"
+          echo "=========================================="
+
+          echo
+          echo "===== MT7915 文件 ====="
+
+          find target/linux package -type f \
+            2>/dev/null \
+            | grep -Ei \
+              'mt7915|mt76' \
+            | head -300 || true
+
+          echo
+          echo "===== MT7981 文件 ====="
+
+          find target/linux package -type f \
+            2>/dev/null \
+            | grep -Ei \
+              'mt7981' \
+            | head -300 || true
+
+          echo
+          echo "=========================================="
+          echo "⑦ 搜索 18000000.wifi"
+          echo "=========================================="
+
+          grep -Rni \
+            '18000000.wifi' \
+            target/linux \
+            2>/dev/null \
+            | head -200 || true
+
+          echo
+          echo "=========================================="
+          echo "⑧ 搜索 Wi-Fi DTS 节点"
+          echo "=========================================="
+
+          grep -RniE \
+            'wifi@|wmac|wifi0|wifi1|&wifi|mt7915|mt76' \
+            target/linux/mediatek \
+            2>/dev/null \
+            | head -300 || true
+
+          echo
+          echo "=========================================="
+          echo "⑨ 搜索 PCIe"
+          echo "=========================================="
+
+          grep -RniE \
+            'pcie|pci@|status = "okay"|status = "disabled"' \
+            target/linux/mediatek \
+            2>/dev/null \
+            | grep -Ei \
+              '7981|7915|wifi|pcie|pci@' \
+            | head -300 || true
+
+          echo
+          echo "=========================================="
+          echo "⑩ 搜索 EEPROM / calibration"
+          echo "=========================================="
+
+          grep -RniE \
+            'eeprom|calibration|cal-data|factory|mtd-mac-address|mac-address' \
+            target/linux/mediatek \
+            2>/dev/null \
+            | head -300 || true
+
+          echo
+          echo "=========================================="
+          echo "⑪ 搜索 Wi-Fi firmware"
+          echo "=========================================="
+
+          find package target -type f \
+            2>/dev/null \
+            | grep -Ei \
+              'firmware.*mt79|mt7915.*firmware|mt7981.*firmware|wifi.*firmware' \
+            | head -300 || true
+
+          echo
+          echo "=========================================="
+          echo "⑫ 搜索 wifi-scripts"
+          echo "=========================================="
+
+          echo
+          echo "===== wifi-scripts 文件 ====="
+
+          find package target -type f \
+            2>/dev/null \
+            | grep -Ei \
+              'wifi.*script|wifi-scripts|netifd-wireless' \
+            | head -200 || true
+
+          echo
+          echo "===== netifd-wireless.sh ====="
+
+          find . -type f \
+            -name 'netifd-wireless.sh' \
+            -print 2>/dev/null || true
+
+          echo
+          echo "=========================================="
+          echo "⑬ 搜索 WH3000 Pro 专用 patch"
+          echo "=========================================="
+
+          find target/linux/mediatek -type f \
+            2>/dev/null \
+            | grep -Ei \
+              'patch|dts|wh3000|huasifei' \
+            | head -300 || true
+
+          echo
+          echo "=========================================="
+          echo "⑭ 搜索无线驱动 Makefile"
+          echo "=========================================="
+
+          echo
+          echo "===== mt76 ====="
+
+          find package/kernel -type f \
+            2>/dev/null \
+            | grep -Ei \
+              'mt76|wireless' \
+            | head -200 || true
+
+          echo
+          echo "=========================================="
+          echo "⑮ make defconfig"
+          echo "=========================================="
+
+          make defconfig || true
+
+          echo
+          echo "===== defconfig 后 Wi-Fi CONFIG ====="
+
+          grep -E \
+            '^CONFIG_PACKAGE_(kmod-mac80211|kmod-cfg80211|kmod-mt76-core|kmod-mt76-connac|kmod-mt7915e|kmod-mt7981-firmware|mt7981-wo-firmware|wireless-regdb|iwinfo|rpcd-mod-iwinfo|wifi-scripts|wpad-openssl-mbedtls)=' \
+            .config || true
+
+          echo
+          echo "=========================================="
+          echo "⑯ 检查最终 Wi-Fi 模块定义"
+          echo "=========================================="
+
+          echo
+          echo "===== kmod-mt7915e ====="
+
+          find package -type f \
+            2>/dev/null \
+            | grep -E \
+              'mt7915|mt76' \
+            | head -100 || true
+
+          echo
+          echo "=========================================="
+          echo "⑰ 检查 Wi-Fi 相关 DTS 内容"
+          echo "=========================================="
+
+          for f in $(find target/linux -type f \
+            \( -name '*.dts' -o -name '*.dtsi' \) \
+            2>/dev/null \
+            | grep -Ei 'huasifei|wh3000' \
+            | head -20); do
+
             echo
-            echo "----- 当前配置 -----"
+            echo "------------------------------------------"
+            echo "$f"
+            echo "------------------------------------------"
 
-            for x in \
-              luci-theme-design \
-              luci-app-design-config \
-              docker \
-              dockerd \
-              containerd \
-              luci-app-dockerman \
-              lucky \
-              luci-app-lucky \
-              kmod-mt7915e \
-              kmod-mt7981-firmware \
-              mt7981-wo-firmware \
-              qmodem \
-              luci-app-qmodem-next
-            do
-              if grep -q "^CONFIG_PACKAGE_${x}=y$" .config; then
-                echo "OK      $x"
-              else
-                echo "MISSING $x"
-              fi
-            done
-          }
+            grep -nE \
+              'pcie|wifi|wmac|7915|7981|eeprom|calibration|factory|firmware|status' \
+              "$f" \
+              2>/dev/null \
+              | head -200 || true
 
-          check_config
+          done
 
           echo
-          echo "========================================"
-          echo "① packages"
-          echo "========================================"
-
-          ./scripts/feeds update packages
-
-          check_config
+          echo "=========================================="
+          echo "⑱ 最终诊断"
+          echo "=========================================="
 
           echo
-          echo "========================================"
-          echo "② luci"
-          echo "========================================"
-
-          ./scripts/feeds update luci
-
-          check_config
-
+          echo "如果上面出现："
           echo
-          echo "========================================"
-          echo "③ routing"
-          echo "========================================"
-
-          ./scripts/feeds update routing
-
-          check_config
-
+          echo "1. WH3000 Pro DTS"
+          echo "2. PCIe status = okay"
+          echo "3. MT7915 节点"
+          echo "4. EEPROM / calibration"
+          echo "5. MT7915 firmware"
+          echo "6. netifd-wireless.sh"
           echo
-          echo "========================================"
-          echo "④ telephony"
-          echo "========================================"
-
-          ./scripts/feeds update telephony
-
-          check_config
-
+          echo "说明对应部分存在。"
           echo
-          echo "========================================"
-          echo "⑤ helloworld"
-          echo "========================================"
-
-          ./scripts/feeds update helloworld
-
-          check_config
-
+          echo "如果某一项完全没有输出，"
+          echo "那就是下一步重点调查对象。"
           echo
-          echo "========================================"
-          echo "⑥ lucky"
-          echo "========================================"
-
-          ./scripts/feeds update lucky
-
-          check_config
-
-          echo
-          echo "========================================"
-          echo "⑦ qmodem"
-          echo "========================================"
-
-          ./scripts/feeds update qmodem
-
-          check_config
-
-          echo
-          echo "========================================"
-          echo "⑧ rtp2httpd"
-          echo "========================================"
-
-          ./scripts/feeds update rtp2httpd
-
-          check_config
-
-          echo
-          echo "========================================"
-          echo "最终测试结束"
-          echo "========================================"
+          echo "=========================================="
+          echo "Wi-Fi 源码诊断结束"
+          echo "=========================================="
