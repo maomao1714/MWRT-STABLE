@@ -1,16 +1,16 @@
-name: MWRT配置诊断
+name: MWRT Feeds 精确测试
 
 on:
   workflow_dispatch:
 
 jobs:
-  diagnose:
+  test:
     runs-on: ubuntu-22.04
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: 开始诊断
+      - name: Feeds 精确测试
         run: |
           sudo apt-get update
           sudo apt-get install -y git build-essential gawk gettext libncurses5-dev libssl-dev rsync unzip python3-distutils
@@ -26,65 +26,72 @@ jobs:
           echo "================================"
           echo "① 原始配置"
           echo "================================"
+
           cp .config .diag/0-original
 
-          grep -E '^CONFIG_PACKAGE_(luci-theme-design|luci-app-design-config|docker|dockerd|luci-app-dockerman|lucky|luci-app-lucky|kmod-mt7915e|kmod-mt7981-firmware|mt7981-wo-firmware|qmodem|luci-app-qmodem-next)=' .config || true
+          grep -E '^CONFIG_PACKAGE_(luci-theme-design|luci-app-design-config|docker|dockerd|containerd|luci-app-dockerman|lucky|luci-app-lucky|kmod-mt7915e|kmod-mt7981-firmware|mt7981-wo-firmware|qmodem|luci-app-qmodem-next)=' .config || true
 
           echo "================================"
           echo "② DIY1"
           echo "================================"
+
           bash ../diy-part1.sh || true
+
           cp .config .diag/1-diy1
 
-          grep -E '^CONFIG_PACKAGE_(luci-theme-design|luci-app-design-config|docker|dockerd|luci-app-dockerman|lucky|luci-app-lucky|kmod-mt7915e|kmod-mt7981-firmware|mt7981-wo-firmware|qmodem|luci-app-qmodem-next)=' .config || true
+          grep -E '^CONFIG_PACKAGE_(luci-theme-design|luci-app-design-config|docker|dockerd|containerd|luci-app-dockerman|lucky|luci-app-lucky|kmod-mt7915e|kmod-mt7981-firmware|mt7981-wo-firmware|qmodem|luci-app-qmodem-next)=' .config || true
 
           echo "================================"
-          echo "③ FEEDS"
+          echo "③ 只执行 feeds update -a"
           echo "================================"
+
           ./scripts/feeds update -a || true
+
+          cp .config .diag/2-update
+
+          grep -E '^CONFIG_PACKAGE_(luci-theme-design|luci-app-design-config|docker|dockerd|containerd|luci-app-dockerman|lucky|luci-app-lucky|kmod-mt7915e|kmod-mt7981-firmware|mt7981-wo-firmware|qmodem|luci-app-qmodem-next)=' .config || true
+
+          echo "================================"
+          echo "④ 只执行 feeds install -a"
+          echo "================================"
+
           ./scripts/feeds install -a || true
+
+          cp .config .diag/3-install
+
+          grep -E '^CONFIG_PACKAGE_(luci-theme-design|luci-app-design-config|docker|dockerd|containerd|luci-app-dockerman|lucky|luci-app-lucky|kmod-mt7915e|kmod-mt7981-firmware|mt7981-wo-firmware|qmodem|luci-app-qmodem-next)=' .config || true
+
+          echo "================================"
+          echo "⑤ 只执行 qmodem update"
+          echo "================================"
+
           ./scripts/feeds update qmodem || true
+
+          cp .config .diag/4-qmodem-update
+
+          grep -E '^CONFIG_PACKAGE_(luci-theme-design|luci-app-design-config|docker|dockerd|containerd|luci-app-dockerman|lucky|luci-app-lucky|kmod-mt7915e|kmod-mt7981-firmware|mt7981-wo-firmware|qmodem|luci-app-qmodem-next)=' .config || true
+
+          echo "================================"
+          echo "⑥ 只执行 qmodem install"
+          echo "================================"
+
           ./scripts/feeds install -a -p qmodem || true
-          cp .config .diag/2-feeds
 
-          grep -E '^CONFIG_PACKAGE_(luci-theme-design|luci-app-design-config|docker|dockerd|luci-app-dockerman|lucky|luci-app-lucky|kmod-mt7915e|kmod-mt7981-firmware|mt7981-wo-firmware|qmodem|luci-app-qmodem-next)=' .config || true
+          cp .config .diag/5-qmodem-install
 
-          echo "================================"
-          echo "④ DIY2"
-          echo "================================"
-          DEVICE=wh3000pro bash ../diy-part2.sh || true
-          cp .config .diag/3-diy2
-
-          grep -E '^CONFIG_PACKAGE_(luci-theme-design|luci-app-design-config|docker|dockerd|luci-app-dockerman|lucky|luci-app-lucky|kmod-mt7915e|kmod-mt7981-firmware|mt7981-wo-firmware|qmodem|luci-app-qmodem-next)=' .config || true
+          grep -E '^CONFIG_PACKAGE_(luci-theme-design|luci-app-design-config|docker|dockerd|containerd|luci-app-dockerman|lucky|luci-app-lucky|kmod-mt7915e|kmod-mt7981-firmware|mt7981-wo-firmware|qmodem|luci-app-qmodem-next)=' .config || true
 
           echo "================================"
-          echo "⑤ QMODEM"
-          echo "================================"
-          sed -i '/^CONFIG_PACKAGE_qmodem=/d' .config
-          sed -i '/^CONFIG_PACKAGE_luci-app-qmodem-next=/d' .config
-          sed -i '/^CONFIG_PACKAGE_sms-forwarder-next=/d' .config
-          sed -i '/^CONFIG_PACKAGE_quectel-CM-5G-M=/d' .config
-
-          echo 'CONFIG_PACKAGE_qmodem=y' >> .config
-          echo 'CONFIG_PACKAGE_luci-app-qmodem-next=y' >> .config
-          echo 'CONFIG_PACKAGE_sms-forwarder-next=y' >> .config
-          echo 'CONFIG_PACKAGE_quectel-CM-5G-M=y' >> .config
-
-          cp .config .diag/4-qmodem
-
-          grep -E '^CONFIG_PACKAGE_(luci-theme-design|luci-app-design-config|docker|dockerd|luci-app-dockerman|lucky|luci-app-lucky|kmod-mt7915e|kmod-mt7981-firmware|mt7981-wo-firmware|qmodem|luci-app-qmodem-next)=' .config || true
-
-          echo "================================"
-          echo "⑥ DEFCONFIG"
-          echo "================================"
-          make defconfig || true
-          cp .config .diag/5-defconfig
-
-          grep -E '^CONFIG_PACKAGE_(luci-theme-design|luci-app-design-config|docker|dockerd|luci-app-dockerman|lucky|luci-app-lucky|kmod-mt7915e|kmod-mt7981-firmware|mt7981-wo-firmware|qmodem|luci-app-qmodem-next)=' .config || true
-
-          echo "================================"
-          echo "诊断完成"
+          echo "最终对比"
           echo "================================"
 
-          echo "各阶段文件："
-          ls -lh .diag
+          for f in .diag/*; do
+            echo
+            echo "---------- $f ----------"
+            grep -E '^CONFIG_PACKAGE_(luci-theme-design|luci-app-design-config|docker|dockerd|containerd|luci-app-dockerman|lucky|luci-app-lucky|kmod-mt7915e|kmod-mt7981-firmware|mt7981-wo-firmware|qmodem|luci-app-qmodem-next)=' "$f" || true
+          done
+
+          echo
+          echo "================================"
+          echo "测试完成"
+          echo "================================"
