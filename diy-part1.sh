@@ -32,7 +32,6 @@ echo "src-git rtp2httpd https://github.com/stackia/rtp2httpd.git" \
 
 echo ">>> 自定义 Feeds 添加完成"
 
-
 # ─────────────────────────────────────────────
 # msd_lite
 # ─────────────────────────────────────────────
@@ -44,7 +43,6 @@ git clone --depth=1 \
     package/msd_lite
 
 echo ">>> msd_lite 已加入"
-
 
 # ─────────────────────────────────────────────
 # IPTV 管理插件
@@ -66,7 +64,6 @@ else
     echo "[WARN] 跳过 IPTV Manager"
 
 fi
-
 
 # ─────────────────────────────────────────────
 # OpenClash
@@ -94,37 +91,388 @@ fi
 
 rm -rf /tmp/OpenClash
 
-
 # ─────────────────────────────────────────────
 # SongLoft
+#
+# 新方案：
+#
+# 不再编译：
+#   songloft-org/songloft.git
+#
+# 不再使用：
+#   songloft-2.11.3.tar.xz
+#   cf3e19842080...
+#
+# 改为：
+#   1. 从作者仓库只获取 luci-app-songloft
+#   2. 官方 Releases 获取最新 ARM64 完整版二进制
+#   3. 官方 checksums.txt 校验
+#   4. 创建 package/songloft
+#   5. 保留原来的 songloft.init / songloft.config
+#
+# WH3000 / WH3000 Pro：
+#   MT7981 ARM64
+#   使用 songloft-linux-arm64
+#
+# RE-SP-01B：
+#   MT7621 MIPS
+#   不安装 SongLoft
 # ─────────────────────────────────────────────
 
-echo ">>> 加入 SongLoft..."
+echo ""
+echo "========================================"
+echo " SongLoft 官方最新二进制版"
+echo "========================================"
 
-git clone --depth=1 \
-    https://github.com/songloft-org/songloft-for-router.git \
-    /tmp/songloft-for-router
+SONGLOFT_ROUTER_DIR="/tmp/songloft-for-router"
+SONGLOFT_PKG_DIR="package/songloft"
 
-if [ -d "/tmp/songloft-for-router/openwrt/songloft" ]; then
+case "${DEVICE:-}" in
 
-    cp -r \
-        /tmp/songloft-for-router/openwrt/songloft \
-        package/songloft
+    wh3000|wh3000pro)
+
+        echo ">>> 当前设备：${DEVICE}"
+        echo ">>> 架构：ARM64"
+        echo ">>> 使用官方最新完整版：songloft-linux-arm64"
+
+        # ─────────────────────────────────────
+        # 拉取官方 router 仓库
+        #
+        # 这里只获取 LuCI 插件和官方 init/config。
+        # 不再复制作者的 package/songloft，
+        # 避免进入旧的 2.11.3 Git 编译流程。
+        # ─────────────────────────────────────
+
+        rm -rf "$SONGLOFT_ROUTER_DIR"
+
+        git clone --depth=1 \
+            https://github.com/songloft-org/songloft-for-router.git \
+            "$SONGLOFT_ROUTER_DIR"
+
+        # ─────────────────────────────────────
+        # 加入 LuCI 插件
+        # ─────────────────────────────────────
+
+        if [ -d "$SONGLOFT_ROUTER_DIR/openwrt/luci-app-songloft" ]; then
+
+            cp -r \
+                "$SONGLOFT_ROUTER_DIR/openwrt/luci-app-songloft" \
+                package/luci-app-songloft
+
+            echo ">>> luci-app-songloft 已加入"
+
+        else
+
+            echo "[ERROR] 找不到 luci-app-songloft"
+            exit 1
+
+        fi
+
+        # ─────────────────────────────────────
+        # 创建新的二进制 SongLoft package
+        # ─────────────────────────────────────
+
+        rm -rf "$SONGLOFT_PKG_DIR"
+
+        mkdir -p \
+            "$SONGLOFT_PKG_DIR/files" \
+            "$SONGLOFT_PKG_DIR/files/usr/bin" \
+            "$SONGLOFT_PKG_DIR/files/etc/init.d" \
+            "$SONGLOFT_PKG_DIR/files/etc/config"
+
+        # ─────────────────────────────────────
+        # 保留作者官方 init/config
+        #
+        # 这样 LuCI 和启动逻辑仍然沿用作者方案。
+        # ─────────────────────────────────────
+
+        if [ -f "$SONGLOFT_ROUTER_DIR/openwrt/songloft/files/songloft.init" ]; then
+
+            cp \
+                "$SONGLOFT_ROUTER_DIR/openwrt/songloft/files/songloft.init" \
+                "$SONGLOFT_PKG_DIR/files/etc/init.d/songloft"
+
+        else
+
+            echo "[ERROR] 找不到官方 songloft.init"
+            exit 1
+
+        fi
+
+        if [ -f "$SONGLOFT_ROUTER_DIR/openwrt/songloft/files/songloft.config" ]; then
+
+            cp \
+                "$SONGLOFT_ROUTER_DIR/openwrt/songloft/files/songloft.config" \
+                "$SONGLOFT_PKG_DIR/files/etc/config/songloft"
+
+        else
+
+            echo "[ERROR] 找不到官方 songloft.config"
+            exit 1
+
+        fi
+
+        # ─────────────────────────────────────
+        # 下载官方最新 ARM64 完整版
+        #
+        # 官方：
+        # https://github.com/songloft-org/songloft
+        #
+        # latest/download 会自动指向最新 Release。
+        # ─────────────────────────────────────
+
+        SONGLOFT_BIN_URL="https://github.com/songloft-org/songloft/releases/latest/download/songloft-linux-arm64"
+        SONGLOFT_CHECKSUM_URL="https://github.com/songloft-org/songloft/releases/latest/download/checksums.txt"
+
+        SONGLOFT_BIN="$SONGLOFT_PKG_DIR/files/usr/bin/songloft"
+        SONGLOFT_CHECKSUMS="/tmp/songloft-checksums.txt"
+
+        echo ">>> 下载官方最新 SongLoft ARM64..."
+
+        if command -v curl >/dev/null 2>&1; then
+
+            curl -fL \
+                --retry 5 \
+                --retry-delay 3 \
+                --connect-timeout 20 \
+                --max-time 300 \
+                "$SONGLOFT_BIN_URL" \
+                -o "$SONGLOFT_BIN"
+
+            curl -fL \
+                --retry 5 \
+                --retry-delay 3 \
+                --connect-timeout 20 \
+                --max-time 120 \
+                "$SONGLOFT_CHECKSUM_URL" \
+                -o "$SONGLOFT_CHECKSUMS"
+
+        elif command -v wget >/dev/null 2>&1; then
+
+            wget \
+                --tries=5 \
+                --timeout=30 \
+                -O "$SONGLOFT_BIN" \
+                "$SONGLOFT_BIN_URL"
+
+            wget \
+                --tries=5 \
+                --timeout=30 \
+                -O "$SONGLOFT_CHECKSUMS" \
+                "$SONGLOFT_CHECKSUM_URL"
+
+        else
+
+            echo "[ERROR] 系统没有 curl 或 wget"
+            exit 1
+
+        fi
+
+        # ─────────────────────────────────────
+        # 检查二进制文件
+        # ─────────────────────────────────────
+
+        if [ ! -s "$SONGLOFT_BIN" ]; then
+
+            echo "[ERROR] SongLoft ARM64 二进制下载失败"
+            exit 1
+
+        fi
+
+        echo ">>> SongLoft ARM64 下载成功"
+
+        # ─────────────────────────────────────
+        # 官方 SHA256 校验
+        # ─────────────────────────────────────
+
+        echo ">>> 校验官方 SongLoft SHA256..."
+
+        SONGLOFT_EXPECTED_SHA256="$(
+            grep 'songloft-linux-arm64$' "$SONGLOFT_CHECKSUMS" \
+                | awk '{print $1}' \
+                | head -n 1
+        )"
+
+        if [ -z "$SONGLOFT_EXPECTED_SHA256" ]; then
+
+            echo "[ERROR] checksums.txt 中找不到 songloft-linux-arm64"
+            echo ">>> checksums.txt 内容："
+            cat "$SONGLOFT_CHECKSUMS"
+            exit 1
+
+        fi
+
+        SONGLOFT_ACTUAL_SHA256="$(
+            sha256sum "$SONGLOFT_BIN" \
+                | awk '{print $1}'
+        )"
+
+        echo ">>> 官方 SHA256：$SONGLOFT_EXPECTED_SHA256"
+        echo ">>> 实际 SHA256：$SONGLOFT_ACTUAL_SHA256"
+
+        if [ "$SONGLOFT_EXPECTED_SHA256" != "$SONGLOFT_ACTUAL_SHA256" ]; then
+
+            echo "[ERROR] SongLoft SHA256 校验失败"
+            exit 1
+
+        fi
+
+        echo ">>> SongLoft SHA256 校验通过"
+
+        # ─────────────────────────────────────
+        # 设置可执行权限
+        # ─────────────────────────────────────
+
+        chmod 0755 "$SONGLOFT_BIN"
+
+        # ─────────────────────────────────────
+        # 创建二进制版 package/songloft/Makefile
+        #
+        # 注意：
+        # 包名仍然叫 songloft。
+        #
+        # 这样现有：
+        #   luci-app-songloft
+        #
+        # 中的：
+        #   LUCI_DEPENDS:=+songloft
+        #
+        # 无需修改。
+        # ─────────────────────────────────────
+
+        cat > "$SONGLOFT_PKG_DIR/Makefile" << 'EOF'
+include $(TOPDIR)/rules.mk
+
+PKG_NAME:=songloft
+PKG_VERSION:=9999
+PKG_RELEASE:=1
+
+PKG_LICENSE:=Apache-2.0
+PKG_MAINTAINER:=songloft-for-router contributors
+
+include $(INCLUDE_DIR)/package.mk
+
+define Package/songloft
+  SECTION:=net
+  CATEGORY:=Network
+  TITLE:=Songloft official ARM64 binary
+  URL:=https://github.com/songloft-org/songloft
+  DEPENDS:=+ca-bundle
+endef
+
+define Package/songloft/description
+  Songloft official prebuilt ARM64 binary.
+  The binary is downloaded from the official Songloft GitHub Release
+  during the MWRT DIY stage.
+endef
+
+define Package/songloft/conffiles
+/etc/config/songloft
+endef
+
+define Package/songloft/install
+	$(INSTALL_DIR) $(1)/usr/bin
+	$(INSTALL_BIN) ./files/usr/bin/songloft $(1)/usr/bin/songloft
+
+	$(INSTALL_DIR) $(1)/etc/init.d
+	$(INSTALL_BIN) ./files/etc/init.d/songloft $(1)/etc/init.d/songloft
+
+	$(INSTALL_DIR) $(1)/etc/config
+	$(INSTALL_CONF) ./files/etc/config/songloft $(1)/etc/config/songloft
+endef
+
+$(eval $(call BuildPackage,songloft))
+EOF
+
+        # ─────────────────────────────────────
+        # 删除临时源码仓库
+        # ─────────────────────────────────────
+
+        rm -rf "$SONGLOFT_ROUTER_DIR"
+        rm -f "$SONGLOFT_CHECKSUMS"
+
+        echo ">>> SongLoft 官方最新 ARM64 二进制 package 已准备完成"
+
+        ;;
+
+    re-sp-01b)
+
+        echo ">>> 当前设备：RE-SP-01B"
+        echo ">>> 架构：MT7621 / MIPS"
+        echo ">>> 官方 SongLoft 当前没有对应 MIPS 二进制"
+        echo ">>> 跳过 SongLoft"
+
+        rm -rf \
+            package/songloft \
+            package/luci-app-songloft
+
+        ;;
+
+    *)
+
+        echo ">>> 当前 DEVICE=${DEVICE:-未设置}"
+        echo ">>> 未启用 SongLoft ARM64 二进制"
+
+        rm -rf \
+            package/songloft \
+            package/luci-app-songloft
+
+        ;;
+
+esac
+
+# ─────────────────────────────────────────────
+# SongLoft 最终检查
+# ─────────────────────────────────────────────
+
+if [ "${DEVICE:-}" = "wh3000" ] || \
+   [ "${DEVICE:-}" = "wh3000pro" ]; then
+
+    echo ""
+    echo "========================================"
+    echo " SongLoft 最终检查"
+    echo "========================================"
+
+    if [ ! -f "package/songloft/Makefile" ]; then
+        echo "[ERROR] package/songloft/Makefile 不存在"
+        exit 1
+    fi
+
+    if [ ! -x "package/songloft/files/usr/bin/songloft" ]; then
+        echo "[ERROR] 官方 SongLoft ARM64 二进制不存在或不可执行"
+        exit 1
+    fi
+
+    if [ ! -f "package/songloft/files/etc/init.d/songloft" ]; then
+        echo "[ERROR] songloft.init 不存在"
+        exit 1
+    fi
+
+    if [ ! -f "package/songloft/files/etc/config/songloft" ]; then
+        echo "[ERROR] songloft.config 不存在"
+        exit 1
+    fi
+
+    if [ ! -d "package/luci-app-songloft" ]; then
+        echo "[ERROR] luci-app-songloft 不存在"
+        exit 1
+    fi
+
+    echo "  ✓ songloft Makefile"
+    echo "  ✓ 官方 ARM64 二进制"
+    echo "  ✓ songloft init"
+    echo "  ✓ songloft config"
+    echo "  ✓ luci-app-songloft"
+
+    echo ""
+    echo ">>> SongLoft 已切换为官方最新 ARM64 二进制模式"
+    echo ">>> 不再编译 songloft 2.11.3 Git 源码"
+
+else
+
+    echo ">>> 当前设备不启用 SongLoft ARM64"
 
 fi
-
-if [ -d "/tmp/songloft-for-router/openwrt/luci-app-songloft" ]; then
-
-    cp -r \
-        /tmp/songloft-for-router/openwrt/luci-app-songloft \
-        package/luci-app-songloft
-
-fi
-
-rm -rf /tmp/songloft-for-router
-
-echo ">>> SongLoft 已加入"
-
 
 # ─────────────────────────────────────────────
 # luci-app-webdav
@@ -138,7 +486,6 @@ git clone --depth=1 \
     package/luci-app-webdav
 
 echo ">>> luci-app-webdav 已加入"
-
 
 # ─────────────────────────────────────────────
 # RE-SP-01B：
@@ -179,7 +526,6 @@ import os
 DTS = 'target/linux/ramips/dts/mt7621_jdcloud_re-sp-01b.dts'
 MK  = 'target/linux/ramips/image/mt7621.mk'
 
-
 # ─────────────────────────────────────────────
 # DTS
 # ─────────────────────────────────────────────
@@ -192,12 +538,14 @@ with open(DTS, 'r', encoding='utf-8') as f:
 orig = src
 
 # firmware 分区扩大到完整 32MB 可用空间
+
 src = src.replace(
     'reg = <0x50000 0x1ab0000>',
     'reg = <0x50000 0x1fb0000>'
 )
 
 # 删除 mini 分区
+
 src = re.sub(
     r'\n\s*partition@1b00000\s*\{[^}]*\}\s*;',
     '',
@@ -206,6 +554,7 @@ src = re.sub(
 )
 
 # 删除 OEM 分区
+
 src = re.sub(
     r'\n\s*partition@1f00000\s*\{[^}]*\}\s*;',
     '',
@@ -223,7 +572,6 @@ if src != orig:
 else:
 
     print("  [OK] DTS 无需修改")
-
 
 # ─────────────────────────────────────────────
 # mt7621.mk
@@ -272,7 +620,6 @@ else
 
 fi
 
-
 # ─────────────────────────────────────────────
 # 不再进行 Linux 6.18 WED patch 暴力删除
 #
@@ -291,7 +638,6 @@ echo ""
 echo ">>> 跳过历史 Linux 6.18 WED patch 清理"
 echo ">>> 使用 LEDE 当前 target/kernel 组合"
 
-
 # ─────────────────────────────────────────────
 # 不再强制修改 QMI WWAN 驱动源码
 #
@@ -307,7 +653,6 @@ echo ">>> 使用 LEDE 当前 target/kernel 组合"
 
 echo ">>> 跳过历史 QMI WWAN 源码兼容补丁"
 
-
 # ─────────────────────────────────────────────
 # 不再修改 crypto.mk
 #
@@ -320,7 +665,6 @@ echo ">>> 跳过历史 QMI WWAN 源码兼容补丁"
 # ─────────────────────────────────────────────
 
 echo ">>> 跳过历史 libpoly1305.ko 补丁"
-
 
 # ─────────────────────────────────────────────
 # 完成
@@ -351,11 +695,21 @@ echo "========================================"
 [ -d package/luci-app-openclash ] && \
     echo "  ✓ luci-app-openclash"
 
-[ -d package/songloft ] && \
-    echo "  ✓ songloft"
+if [ "${DEVICE:-}" = "wh3000" ] || \
+   [ "${DEVICE:-}" = "wh3000pro" ]; then
 
-[ -d package/luci-app-songloft ] && \
-    echo "  ✓ luci-app-songloft"
+    [ -d package/songloft ] && \
+        echo "  ✓ songloft（官方最新 ARM64 二进制）"
+
+    [ -d package/luci-app-songloft ] && \
+        echo "  ✓ luci-app-songloft"
+
+else
+
+    echo "  - songloft（当前设备不支持，已跳过）"
+    echo "  - luci-app-songloft（当前设备不支持，已跳过）"
+
+fi
 
 [ -d package/luci-app-webdav ] && \
     echo "  ✓ luci-app-webdav"
