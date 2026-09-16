@@ -1,0 +1,86 @@
+name: 自动处理 DIY2 - 移除 WH3000 / WH3000 Pro 自定义WiFi
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  process-diy2:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: 📥 检出仓库
+        uses: actions/checkout@v4
+
+      - name: 🔧 安装处理环境
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl python3
+
+      - name: 🛠️ 下载并调用自动处理脚本
+        run: |
+          chmod +x diy-part2-remove-wh3000-wifi-auto.sh
+
+          ./diy-part2-remove-wh3000-wifi-auto.sh
+
+      - name: 🔍 最终检查
+        run: |
+          OUTPUT="diy-part2-stable-wh3000pro-latest-6-no-wifi-wh3000-wh3000pro.sh"
+
+          echo "=============================================="
+          echo "           DIY2 最终检查"
+          echo "=============================================="
+
+          if [ ! -f "$OUTPUT" ]; then
+            echo "❌ 输出文件不存在"
+            exit 1
+          fi
+
+          echo "文件：$OUTPUT"
+          echo "行数：$(wc -l < "$OUTPUT")"
+          echo "大小：$(du -h "$OUTPUT" | cut -f1)"
+          echo ""
+
+          if grep -q "20-wifi-wh3000 <<" "$OUTPUT"; then
+            echo "❌ WH3000 WiFi脚本仍然存在"
+            exit 1
+          fi
+
+          if grep -q "20-wifi-wh3000pro <<" "$OUTPUT"; then
+            echo "❌ WH3000 Pro WiFi脚本仍然存在"
+            exit 1
+          fi
+
+          if ! grep -q "20-wifi-resp01b" "$OUTPUT"; then
+            echo "❌ RE-SP-01B WiFi脚本不存在"
+            exit 1
+          fi
+
+          if ! grep -q "QModem" "$OUTPUT"; then
+            echo "❌ QModem内容不存在"
+            exit 1
+          fi
+
+          if ! grep -q "SongLoft" "$OUTPUT"; then
+            echo "❌ SongLoft内容不存在"
+            exit 1
+          fi
+
+          echo "✅ WH3000 自定义WiFi：已删除"
+          echo "✅ WH3000 Pro 自定义WiFi：已删除"
+          echo "✅ RE-SP-01B WiFi：已保留"
+          echo "✅ QModem：已保留"
+          echo "✅ SongLoft：已保留"
+          echo "=============================================="
+          echo "✅ 检查通过"
+          echo "=============================================="
+
+      - name: 📦 上传处理后的 DIY2
+        uses: actions/upload-artifact@v4
+        with:
+          name: DIY2-WH3000-WH3000Pro-移除自定义WiFi
+          path: diy-part2-stable-wh3000pro-latest-6-no-wifi-wh3000-wh3000pro.sh
+          if-no-files-found: error
+          retention-days: 90
