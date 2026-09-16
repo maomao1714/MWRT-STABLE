@@ -82,6 +82,118 @@ grep -E \
 
 
 # ════════════════════════════════════════════════════════════
+# QModem APN 自动检测补丁
+#
+# 修复 Fibocom + MediaTek 平台空 APN 无法自动拨号问题。
+#
+# 根因：modem_dial.sh 的 fibocom/mediatek 分支中，
+# APN 自动填充逻辑被锁在 pdp_index=3 条件内，
+# pdp_index=0 时永远跳过，导致 AT+CGDCONT 携带空 APN 失败。
+#
+# 修复内容：
+#   1. 新增 auto_detect_apn() 函数，通过 AT+CIMI 读 IMSI
+#      自动匹配中国移动/联通/电信 APN
+#   2. 在 pdp_index=3 判断之前调用该函数，覆盖所有 pdp_index
+# ════════════════════════════════════════════════════════════
+
+echo ">>> [QModem] 修补 modem_dial.sh APN 自动检测..."
+
+_MODEM_DIAL=$(find feeds package \
+    -path "*/qmodem/files/usr/share/qmodem/modem_dial.sh" \
+    2>/dev/null | head -1)
+
+if [ -z "$_MODEM_DIAL" ]; then
+    echo ">>> [WARN] 未找到 modem_dial.sh，跳过 APN 补丁"
+else
+    echo ">>> 目标: $_MODEM_DIAL"
+
+    if grep -q "auto_detect_apn" "$_MODEM_DIAL"; then
+        echo ">>> [SKIP] 已包含 APN 补丁"
+    else
+        cat > /tmp/patch_modem_dial.py << 'PYEOF'
+import sys
+
+path = sys.argv[1]
+
+FUNC = r'''
+# ── APN 自动检测：读 IMSI 识别中国运营商 ──────────────────────
+auto_detect_apn() {
+    local at_port="$1"
+    local imsi mcc_mnc apn
+
+    imsi=$(cmd_dial_command "$at_port" "AT+CIMI" \
+           | grep -oE '[0-9]{14,15}' | head -1)
+
+    if [ -z "$imsi" ]; then
+        m_debug "auto_apn: IMSI读取失败，fallback cmnet"
+        echo "cmnet"
+        return
+    fi
+
+    mcc_mnc=$(echo "$imsi" | cut -c1-5)
+    case "$mcc_mnc" in
+        46000|46002|46007|46008) apn="cmnet"  ;;
+        46001|46006|46009)       apn="3gnet"  ;;
+        46003|46005|46011)       apn="ctnet"  ;;
+        *)
+            m_debug "auto_apn: 未知MCC-MNC=$mcc_mnc，fallback cmnet"
+            apn="cmnet"
+            ;;
+    esac
+
+    m_debug "auto_apn: imsi=$imsi mcc_mnc=$mcc_mnc => apn=$apn"
+    echo "$apn"
+}
+# ─────────────────────────────────────────────────────────────
+
+'''
+
+APN_CHECK = r'''                    if [ "$apn" = "auto" ] || [ -z "$apn" ]; then
+                        apn=$(auto_detect_apn "$at_port")
+                    fi
+'''
+
+with open(path, 'r') as f:
+    content = f.read()
+
+# 1. 在 at_dial() 前插入函数
+anchor1 = 'at_dial()\n'
+if anchor1 not in content:
+    print('ERROR: at_dial() not found', file=sys.stderr)
+    sys.exit(1)
+content = content.replace(anchor1, FUNC + anchor1, 1)
+
+# 2. 在 pdp_index=3 判断前插入 APN 自动检测
+anchor2 = '                    if [ "$pdp_index" = "3" ];then\n'
+if anchor2 not in content:
+    print('ERROR: pdp_index=3 pattern not found', file=sys.stderr)
+    sys.exit(1)
+content = content.replace(anchor2, APN_CHECK + anchor2, 1)
+
+with open(path, 'w') as f:
+    f.write(content)
+
+print(f'Patch OK: {path}')
+PYEOF
+
+        python3 /tmp/patch_modem_dial.py "$_MODEM_DIAL"
+
+        if [ $? -eq 0 ]; then
+            echo ">>> [OK] APN 补丁成功"
+            echo ">>> 补丁内容验证："
+            grep -n "auto_detect_apn" "$_MODEM_DIAL" | head -5
+        else
+            echo ">>> [FAIL] APN 补丁失败，检查上方错误信息"
+        fi
+
+        rm -f /tmp/patch_modem_dial.py
+    fi
+fi
+
+echo ">>> [QModem] APN 补丁段完成"
+
+
+# ════════════════════════════════════════════════════════════
 # OpenVPN
 #
 # 不再修改 OpenVPN 源码。
@@ -923,29 +1035,12 @@ INITEOF
 chmod +x files/etc/init.d/msd_lite
 
 echo ">>> [9-2] msd_lite 双后端 init.d 写入完成"
+
 # ════════════════════════════════════════════════════════════
 # 设备专属设置
 # ════════════════════════════════════════════════════════════
 
 case "$DEVICE" in
-
-    # ════════════════════════════════════════════════════════
-    # WH3000
-    # ════════════════════════════════════════════════════════
-
-    wh3000)
-
-        echo ">>> [10] 应用 WH3000 专属配置..."
-
-        # ----------------------------------------------------
-        # MT7981 WiFi
-        #
-        # 不再下载旧版 OpenWrt v24.10.5
-        # netifd-wireless.sh
-        #
-        # 直接使用当前 LEDE 自带的 wifi-scripts。
-        # ----------------------------------------------------
-
 
 
         # ----------------------------------------------------
@@ -1035,6 +1130,70 @@ EOF
         # MT7981 WiFi
         # ----------------------------------------------------
 
+        mkdir -p files/etc/uci-defaults
+
+        cat > files/etc/uci-defaults/20-wifi-wh3000pro << 'EOF'
+#!/bin/sh
+
+# 等待无线设备出现
+count=0
+
+while [ "$count" -lt 20 ]; do
+
+    if [ -d /sys/class/ieee80211/phy0 ]; then
+        break
+    fi
+
+    sleep 1
+
+    count=$((count + 1))
+
+done
+
+
+# 系统没有 wireless 配置时自动生成
+if [ ! -s /etc/config/wireless ]; then
+
+    wifi config
+
+fi
+
+
+# 2.4G
+if uci -q get wireless.radio0 >/dev/null 2>&1; then
+
+    uci -q set wireless.radio0.disabled='0'
+
+    uci -q set wireless.radio0.path='platform/soc/18000000.wifi'
+
+    uci -q set wireless.default_radio0.ssid='Camera_mao'
+
+    uci -q set wireless.default_radio0.encryption='psk2'
+
+fi
+
+
+# 5G
+if uci -q get wireless.radio1 >/dev/null 2>&1; then
+
+    uci -q set wireless.radio1.disabled='0'
+
+    uci -q set wireless.radio1.path='platform/soc/18000000.wifi+1'
+
+    uci -q set wireless.default_radio1.ssid='栋仔_5G'
+
+    uci -q set wireless.default_radio1.encryption='psk2'
+
+fi
+
+
+uci commit wireless
+
+exit 0
+
+EOF
+
+        chmod +x files/etc/uci-defaults/20-wifi-wh3000pro
 
 
         # ----------------------------------------------------
@@ -1328,6 +1487,29 @@ fi
 
 
 # ------------------------------------------------------------
+# APN 补丁检查
+# ------------------------------------------------------------
+
+echo ""
+echo ">>> APN 补丁检查..."
+
+_MODEM_DIAL_CHECK=$(find feeds package \
+    -path "*/qmodem/files/usr/share/qmodem/modem_dial.sh" \
+    2>/dev/null | head -1)
+
+if [ -n "$_MODEM_DIAL_CHECK" ]; then
+    if grep -q "auto_detect_apn" "$_MODEM_DIAL_CHECK"; then
+        echo ">>> [OK] APN 自动检测补丁已就位"
+    else
+        echo "❌ ERROR：modem_dial.sh 未包含 APN 补丁"
+        exit 1
+    fi
+else
+    echo ">>> [WARN] 未找到 modem_dial.sh，跳过 APN 补丁检查"
+fi
+
+
+# ------------------------------------------------------------
 # WH3000 / WH3000 Pro
 # ------------------------------------------------------------
 
@@ -1447,6 +1629,7 @@ echo " 当前设备 : $DEVICE"
 echo " QModem   : qmodem + luci-app-qmodem-next"
 echo " SMS      : sms-forwarder-next"
 echo " 拨号工具 : quectel-CM-5G-M"
+echo " APN补丁  : Fibocom+MediaTek IMSI自动识别"
 echo " IPTV     : msd_lite + rtp2httpd"
 echo " WiFi     : 当前 LEDE"
 echo " OpenVPN  : 当前 LEDE 原生配置"
