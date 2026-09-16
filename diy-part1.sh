@@ -340,7 +340,7 @@ case "${DEVICE:-}" in
         # 无需修改。
         # ─────────────────────────────────────
 
-        cat > "$SONGLOFT_PKG_DIR/Makefile" << 'EOF'
+                cat > "$SONGLOFT_PKG_DIR/Makefile" << 'EOF'
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=songloft
@@ -362,12 +362,19 @@ endef
 
 define Package/songloft/description
   Songloft official prebuilt ARM64 binary.
-  The binary is downloaded from the official Songloft GitHub Release
-  during the MWRT DIY stage.
 endef
 
 define Package/songloft/conffiles
 /etc/config/songloft
+endef
+
+define Build/Prepare
+endef
+
+define Build/Configure
+endef
+
+define Build/Compile
 endef
 
 define Package/songloft/install
