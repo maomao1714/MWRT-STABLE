@@ -569,8 +569,15 @@ jobs:
 
           cd "${LEDE_DIR}"
 
-          chmod +x "${GITHUB_WORKSPACE}/diy-part1.sh"
+          export DEVICE="${{ inputs.device }}"
 
+          echo "=========================================="
+          echo "🔧 执行 DIY1"
+          echo "=========================================="
+          echo "DEVICE=${DEVICE}"
+          echo
+
+          chmod +x "${GITHUB_WORKSPACE}/diy-part1.sh"
           bash "${GITHUB_WORKSPACE}/diy-part1.sh"
 
           echo "✅ DIY1 执行完成"
