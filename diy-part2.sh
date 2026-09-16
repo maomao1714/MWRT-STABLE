@@ -94,6 +94,7 @@ auto_detect_apn() {
         46000|46002|46007|46008) apn="cmnet" ;;
         46001|46006|46009) apn="3gnet" ;;
         46003|46005|46011) apn="ctnet" ;;
+        46015) apn="cbnet" ;;
         *) m_debug "auto_apn: 未知MCC-MNC=$mcc_mnc，fallback cmnet"; apn="cmnet" ;;
     esac
     m_debug "auto_apn: imsi=$imsi mcc_mnc=$mcc_mnc => apn=$apn"
