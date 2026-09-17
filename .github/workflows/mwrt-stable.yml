@@ -48,7 +48,6 @@ jobs:
     timeout-minutes: 360
 
     steps:
-
       - name: "📥 Checkout"
         uses: actions/checkout@v4
 
