@@ -941,33 +941,33 @@ jobs:
             fi
 
           done
-          # ------------------------------------------------------
-          # PPPoE 核心包必须 =y 才能进固件
-          # ------------------------------------------------------
-          for pkg in \
-          kmod-ppp \
-          kmod-pppox \
-          kmod-pppoe \
-          ppp \
-          ppp-mod-pppoe \
-          luci-proto-ppp
-          do
+# ------------------------------------------------------
+# PPPoE 核心包必须 =y 才能进固件
+# ------------------------------------------------------
+       for pkg in \
+        kmod-ppp \
+        kmod-pppox \
+        kmod-pppoe \
+        ppp \
+        ppp-mod-pppoe \
+        luci-proto-ppp
+       do
 
-          if find_pkg "${pkg}"; then
+       if find_pkg "${pkg}"; then
 
-          sed -i "/^CONFIG_PACKAGE_${pkg}=/d" .config
+       sed -i "/^CONFIG_PACKAGE_${pkg}=/d" .config
 
-          echo "CONFIG_PACKAGE_${pkg}=y" >> .config
+       echo "CONFIG_PACKAGE_${pkg}=y" >> .config
 
-          echo "✅ ${pkg} -> y"
+       echo "✅ ${pkg} -> y"
 
-          else
+       else
 
-          echo "⏭️ ${pkg} 不存在，跳过"
+       echo "⏭️ ${pkg} 不存在，跳过"
 
-          fi
+       fi
 
-          done
+       done
           echo
           echo "===== WWAN 最终配置 ====="
 
@@ -981,9 +981,9 @@ jobs:
           echo "✅ WWAN 驱动配置完成"
 
 
-          # ==========================================================
-          # 17. 检查 TARGET
-          # ==========================================================
+      # ==========================================================
+      # 17. 检查 TARGET
+      # ==========================================================
       - name: "🎯 检查 TARGET"
         shell: bash
         run: |
