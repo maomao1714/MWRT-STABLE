@@ -1,0 +1,1576 @@
+name: "🏗️ MWRT-STABLE 固件编译"
+
+on:
+  workflow_dispatch:
+    inputs:
+      device:
+        description: "选择设备"
+        required: true
+        type: choice
+        options:
+          - wh3000
+          - wh3000pro
+          - re-sp-01b
+        default: wh3000pro
+
+      kernel:
+        description: "选择内核：6.6 或 LEDE 当前稳定内核"
+        required: true
+        type: choice
+        options:
+          - "6.6"
+          - "latest"
+        default: "latest"
+
+      build_mode:
+        description: "编译模式"
+        required: true
+        type: choice
+        options:
+          - fast
+          - clean
+        default: fast
+
+permissions:
+  contents: write
+
+env:
+  LEDE_REPO: "https://github.com/coolsnowwolf/lede.git"
+  LEDE_BRANCH: "master"
+  LEDE_DIR: "openwrt"
+  MAKE_JOBS: 4
+  TZ: "Asia/Shanghai"
+
+jobs:
+  build:
+    name: "${{ inputs.device }} / Linux ${{ inputs.kernel }}"
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+
+      # ==========================================================
+      # 01. Checkout
+      # ==========================================================
+      - name: "📥 Checkout"
+        uses: actions/checkout@v4
+
+
+      # ==========================================================
+      # 02. 清理旧工作目录
+      # ==========================================================
+      - name: "🧹 清理旧工作目录"
+        if: inputs.build_mode == 'clean'
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          rm -rf "${LEDE_DIR}"
+          rm -rf "${GITHUB_WORKSPACE}/release"
+
+          echo "✅ Clean 模式清理完成"
+
+
+      # ==========================================================
+      # 03. Runner 状态
+      # ==========================================================
+      - name: "💽 检查磁盘与内存"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          echo "=========================================="
+          echo "💽 Runner 磁盘"
+          echo "=========================================="
+
+          df -h
+
+          echo
+          echo "=========================================="
+          echo "🧠 Runner 内存"
+          echo "=========================================="
+
+          free -h
+
+
+      # ==========================================================
+      # 04. 安装编译依赖
+      # ==========================================================
+      - name: "🧰 安装编译依赖"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          sudo apt-get update
+
+          sudo apt-get install -y \
+            ack \
+            antlr3 \
+            asciidoc \
+            autoconf \
+            automake \
+            autopoint \
+            binutils \
+            bison \
+            build-essential \
+            bzip2 \
+            ccache \
+            cmake \
+            cpio \
+            curl \
+            device-tree-compiler \
+            fastjar \
+            flex \
+            gawk \
+            gettext \
+            gcc-multilib \
+            g++-multilib \
+            git \
+            gnutls-dev \
+            help2man \
+            intltool \
+            libc6-dev-i386 \
+            libelf-dev \
+            libffi-dev \
+            libglib2.0-dev \
+            libncurses5-dev \
+            libncursesw5-dev \
+            libpcre3-dev \
+            libpython3-dev \
+            libreadline-dev \
+            libssl-dev \
+            libtool \
+            libtool-bin \
+            libxml-parser-perl \
+            libyaml-dev \
+            mkisofs \
+            ninja-build \
+            p7zip-full \
+            patch \
+            pkgconf \
+            python3 \
+            python3-dev \
+            python3-pip \
+            python3-setuptools \
+            rsync \
+            swig \
+            texinfo \
+            unzip \
+            uuid-dev \
+            wget \
+            xsltproc \
+            zlib1g-dev
+
+
+      # ==========================================================
+      # 05. 配置 ccache
+      # ==========================================================
+      - name: "📦 配置 ccache"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          mkdir -p "${HOME}/.ccache"
+
+          ccache --set-config=max_size=5G
+          ccache --set-config=compression=true
+          ccache --set-config=compiler_check=content
+
+          echo "=========================================="
+          echo "📦 ccache 配置"
+          echo "=========================================="
+
+          ccache --show-config
+
+
+      # ==========================================================
+      # 06. ccache 缓存
+      # ==========================================================
+      - name: "💾 恢复 ccache"
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: mwrt-stable-ccache-${{ runner.os }}-${{ inputs.device }}-${{ inputs.kernel }}-${{ hashFiles('diy-part1.sh', 'diy-part2.sh', '*.config') }}
+          restore-keys: |
+            mwrt-stable-ccache-${{ runner.os }}-${{ inputs.device }}-${{ inputs.kernel }}-
+            mwrt-stable-ccache-${{ runner.os }}-
+            mwrt-stable-ccache-
+
+
+      # ==========================================================
+      # 07. 获取 LEDE master
+      # ==========================================================
+      - name: "📥 获取 LEDE master"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          rm -rf "${LEDE_DIR}"
+
+          git clone \
+            --depth=1 \
+            --single-branch \
+            --branch "${LEDE_BRANCH}" \
+            "${LEDE_REPO}" \
+            "${LEDE_DIR}"
+
+          cd "${LEDE_DIR}"
+
+          LEDE_COMMIT="$(git rev-parse HEAD)"
+
+          echo "LEDE_COMMIT=${LEDE_COMMIT}" >> "${GITHUB_ENV}"
+
+          echo "=========================================="
+          echo "📥 LEDE 源码"
+          echo "=========================================="
+
+          echo "Repository : ${LEDE_REPO}"
+          echo "Branch     : ${LEDE_BRANCH}"
+          echo "Commit     : ${LEDE_COMMIT}"
+
+          echo
+
+          git log -1 --oneline
+
+
+      # ==========================================================
+      # 08. 基础文件检查
+      # ==========================================================
+      - name: "🔎 检查基础文件"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          echo "=========================================="
+          echo "🔎 MWRT 基础文件检查"
+          echo "=========================================="
+
+          for f in \
+            "${GITHUB_WORKSPACE}/diy-part1.sh" \
+            "${GITHUB_WORKSPACE}/diy-part2.sh" \
+            "${GITHUB_WORKSPACE}/wh3000.config" \
+            "${GITHUB_WORKSPACE}/wh3000pro.config" \
+            "${GITHUB_WORKSPACE}/re-sp-01b.config"
+          do
+
+            if [ ! -f "$f" ]; then
+              echo "❌ 缺少文件：$f"
+              exit 1
+            fi
+
+            echo "✅ $f"
+
+          done
+
+          echo
+          echo "✅ 基础文件检查完成"
+
+
+      # ==========================================================
+      # 09. 加载设备配置
+      # ==========================================================
+      - name: "📦 加载设备配置"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          cd "${LEDE_DIR}"
+
+          case "${{ inputs.device }}" in
+
+            wh3000)
+
+              CONFIG_FILE="${GITHUB_WORKSPACE}/wh3000.config"
+
+              ;;
+
+            wh3000pro)
+
+              CONFIG_FILE="${GITHUB_WORKSPACE}/wh3000pro.config"
+
+              ;;
+
+            re-sp-01b)
+
+              CONFIG_FILE="${GITHUB_WORKSPACE}/re-sp-01b.config"
+
+              ;;
+
+            *)
+
+              echo "❌ 未知设备：${{ inputs.device }}"
+
+              exit 1
+
+              ;;
+
+          esac
+
+          if [ ! -f "${CONFIG_FILE}" ]; then
+            echo "❌ 找不到配置文件：${CONFIG_FILE}"
+            exit 1
+          fi
+
+          echo "=========================================="
+          echo "📦 加载设备配置"
+          echo "=========================================="
+
+          echo "Device : ${{ inputs.device }}"
+          echo "Config : ${CONFIG_FILE}"
+
+          cp "${CONFIG_FILE}" .config
+
+          echo
+          echo "===== TARGET ====="
+
+          grep '^CONFIG_TARGET_' .config || true
+
+          echo
+          echo "===== 原始 Kernel 配置 ====="
+
+          grep -E \
+            '^CONFIG_(LINUX_|TESTING_KERNEL)' \
+            .config \
+            || true
+
+
+      # ==========================================================
+      # 10. Kernel 基线检查
+      # ==========================================================
+      - name: "🐧 Kernel 基线检查"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          cd "${LEDE_DIR}"
+
+          DEVICE="${{ inputs.device }}"
+          KERNEL="${{ inputs.kernel }}"
+
+          echo "=========================================="
+          echo "🐧 Kernel 基线检查"
+          echo "=========================================="
+
+          echo "Device : ${DEVICE}"
+          echo "Select : ${KERNEL}"
+
+          case "${DEVICE}" in
+
+            wh3000|wh3000pro)
+
+              TARGET_MAKEFILE="target/linux/mediatek/Makefile"
+              TARGET_DIR="target/linux/mediatek"
+
+              ;;
+
+            re-sp-01b)
+
+              TARGET_MAKEFILE="target/linux/ramips/Makefile"
+              TARGET_DIR="target/linux/ramips"
+
+              ;;
+
+            *)
+
+              echo "❌ 未知设备"
+              exit 1
+
+              ;;
+
+          esac
+
+          if [ ! -f "${TARGET_MAKEFILE}" ]; then
+
+            echo "❌ 找不到：${TARGET_MAKEFILE}"
+
+            exit 1
+
+          fi
+
+          echo
+          echo "===== 当前 Target Kernel ====="
+
+          grep -E \
+            '^[[:space:]]*KERNEL_PATCHVER|^[[:space:]]*KERNEL_TESTING_PATCHVER' \
+            "${TARGET_MAKEFILE}" \
+            || true
+
+          echo
+          echo "===== Generic Kernel ====="
+
+          for V in 6.1 6.6; do
+
+            if [ -f "target/linux/generic/config-${V}" ]; then
+              echo "✅ generic/config-${V}"
+            else
+              echo "⚠️ generic/config-${V} 不存在"
+            fi
+
+          done
+
+          echo
+          echo "===== Target Kernel Patchset ====="
+
+          if [ -d "${TARGET_DIR}/patches-6.6" ]; then
+            echo "✅ ${TARGET_DIR}/patches-6.6"
+          else
+            echo "⚠️ ${TARGET_DIR}/patches-6.6 不存在"
+          fi
+
+          if [ -d "${TARGET_DIR}/patches-6.1" ]; then
+            echo "✅ ${TARGET_DIR}/patches-6.1"
+          else
+            echo "⚠️ ${TARGET_DIR}/patches-6.1 不存在"
+          fi
+
+
+      # ==========================================================
+      # 11. 设置实际 Kernel
+      # ==========================================================
+      - name: "🧠 设置内核策略"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          cd "${LEDE_DIR}"
+
+          DEVICE="${{ inputs.device }}"
+          KERNEL="${{ inputs.kernel }}"
+
+          case "${DEVICE}" in
+
+            wh3000|wh3000pro)
+
+              TARGET_MAKEFILE="target/linux/mediatek/Makefile"
+              TARGET_DIR="target/linux/mediatek"
+
+              ;;
+
+            re-sp-01b)
+
+              TARGET_MAKEFILE="target/linux/ramips/Makefile"
+              TARGET_DIR="target/linux/ramips"
+
+              ;;
+
+            *)
+
+              echo "❌ 未知设备"
+              exit 1
+
+              ;;
+
+          esac
+
+          echo "=========================================="
+          echo "🧠 设置 Kernel 策略"
+          echo "=========================================="
+
+          echo "Device : ${DEVICE}"
+          echo "Kernel : ${KERNEL}"
+
+          # ------------------------------------------------------
+          # 清理配置文件中错误的 Kernel 强制项
+          # ------------------------------------------------------
+
+          sed -i \
+            -e '/^CONFIG_TESTING_KERNEL=/d' \
+            -e '/^CONFIG_LINUX_6_1=/d' \
+            -e '/^CONFIG_LINUX_6_6=/d' \
+            -e '/^CONFIG_LINUX_6_12=/d' \
+            -e '/^CONFIG_LINUX_6_18=/d' \
+            .config
+
+          echo "# CONFIG_TESTING_KERNEL is not set" >> .config
+
+          # ------------------------------------------------------
+          # 选择 Kernel
+          # ------------------------------------------------------
+
+          case "${KERNEL}" in
+
+            "latest")
+
+              echo
+              echo "✅ 使用 LEDE master 当前 Target 默认稳定 Kernel"
+
+              grep -E \
+                '^[[:space:]]*KERNEL_PATCHVER' \
+                "${TARGET_MAKEFILE}" \
+                || true
+
+              ;;
+
+            "6.6")
+
+              echo
+              echo "🔎 检查 Target 6.6 patchset"
+
+              if [ ! -d "${TARGET_DIR}/patches-6.6" ]; then
+
+                echo
+                echo "❌ 当前源码没有："
+                echo "   ${TARGET_DIR}/patches-6.6"
+
+                echo
+                echo "❌ 不能只写 CONFIG_LINUX_6_6=y"
+                echo "❌ 那样不能保证实际 Kernel 为 6.6"
+
+                echo
+                echo "当前 Target Kernel："
+
+                grep -E \
+                  '^[[:space:]]*KERNEL_PATCHVER' \
+                  "${TARGET_MAKEFILE}" \
+                  || true
+
+                echo
+                echo "⛔ 为避免编译到 Kernel patch 阶段才失败，本次停止。"
+
+                exit 1
+
+              fi
+
+              echo
+              echo "🔧 设置 KERNEL_PATCHVER=6.6"
+
+              sed -i \
+                's/^KERNEL_PATCHVER:=.*/KERNEL_PATCHVER:=6.6/' \
+                "${TARGET_MAKEFILE}"
+
+              ;;
+
+            *)
+
+              echo "❌ 无效 Kernel：${KERNEL}"
+
+              exit 1
+
+              ;;
+
+          esac
+
+          echo
+          echo "===== Kernel 最终策略 ====="
+
+          grep -E \
+            '^[[:space:]]*KERNEL_PATCHVER|^[[:space:]]*KERNEL_TESTING_PATCHVER' \
+            "${TARGET_MAKEFILE}" \
+            || true
+
+
+      # ==========================================================
+      # 12. 执行 DIY1
+      # ==========================================================
+      - name: "🔧 执行 DIY1"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          cd "${LEDE_DIR}"
+
+          export DEVICE="${{ inputs.device }}"
+
+          echo "=========================================="
+          echo "🔧 执行 DIY1"
+          echo "=========================================="
+          echo "DEVICE=${DEVICE}"
+          echo
+
+          chmod +x "${GITHUB_WORKSPACE}/diy-part1.sh"
+          bash "${GITHUB_WORKSPACE}/diy-part1.sh"
+
+          echo "✅ DIY1 执行完成"
+
+
+            # ==========================================================
+      # 13. 更新并安装 feeds
+      # ==========================================================
+      - name: "📡 更新并安装 feeds"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          cd "${LEDE_DIR}"
+
+          echo "=========================================="
+          echo "📡 更新并安装 feeds"
+          echo "=========================================="
+
+          # ------------------------------------------------------
+          # 关键修复
+          #
+          # scripts/feeds update 会自动执行 refresh_config()
+          # / make defconfig。
+          #
+          # 此时如果 .config 已经存在，而 feeds 尚未全部准备好，
+          # Docker / Lucky / Design / QModem 等 feed 包配置可能
+          # 被 Kconfig 当成不存在项目而清掉。
+          #
+          # 因此：
+          #   1. 暂时保存设备完整 .config
+          #   2. 删除工作中的 .config
+          #   3. 完成全部 feeds update / install
+          #   4. 恢复设备完整 .config
+          #
+          # 这样不会改变原始设备配置内容。
+          # ------------------------------------------------------
+
+          if [ ! -f .config ]; then
+            echo "❌ 找不到当前设备 .config"
+            exit 1
+          fi
+
+          cp .config .config.device
+
+          echo
+          echo "===== 暂存设备配置 ====="
+          echo "设备配置：.config.device"
+
+          rm -f .config
+
+          echo
+          echo "===== 更新全部 feeds ====="
+
+          ./scripts/feeds update -a
+
+          echo
+          echo "===== 安装全部 feeds ====="
+
+          ./scripts/feeds install -a
+
+          # ------------------------------------------------------
+          # QModem 官方 feed 再单独确认一次
+          # ------------------------------------------------------
+
+          echo
+          echo "===== 更新 QModem feed ====="
+
+          ./scripts/feeds update qmodem
+
+          echo
+          echo "===== 安装 QModem ====="
+
+          ./scripts/feeds install -a -p qmodem
+
+          # ------------------------------------------------------
+          # 所有 feeds 完成后恢复设备配置
+          # ------------------------------------------------------
+
+          if [ ! -f .config.device ]; then
+            echo "❌ .config.device 不存在"
+            exit 1
+          fi
+
+          mv .config.device .config
+
+          echo
+          echo "=========================================="
+          echo "📦 feeds 完成后恢复设备配置"
+          echo "=========================================="
+
+          echo
+          echo "===== TARGET ====="
+          grep '^CONFIG_TARGET_' .config || true
+
+          echo
+          echo "===== Design / Docker / Lucky ====="
+          grep -E \
+            '^CONFIG_PACKAGE_(luci-theme-design|luci-app-design-config|docker|dockerd|containerd|luci-app-dockerman|lucky|luci-app-lucky)=' \
+            .config \
+            || true
+
+          echo
+          echo "===== Wi-Fi ====="
+          grep -E \
+            '^CONFIG_PACKAGE_(kmod-mt7915e|kmod-mt7981-firmware|mt7981-wo-firmware)=' \
+            .config \
+            || true
+
+          echo
+          echo "===== QModem ====="
+          grep -E \
+            '^CONFIG_PACKAGE_(qmodem|luci-app-qmodem-next|sms-forwarder-next|sms-forwarder-next|quectel-CM-5G-M)=' \
+            .config \
+            || true
+
+          echo
+          echo "=========================================="
+          echo "✅ feeds 更新完成"
+          echo "✅ 设备 .config 已恢复"
+          echo "=========================================="
+
+
+      # ==========================================================
+      # 14. 执行 DIY2
+      # ==========================================================
+      - name: "🔧 执行 DIY2"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          cd "${LEDE_DIR}"
+
+          chmod +x "${GITHUB_WORKSPACE}/diy-part2.sh"
+
+          bash "${GITHUB_WORKSPACE}/diy-part2.sh"
+
+          echo "✅ DIY2 执行完成"
+      # ==========================================================
+      # 15. 配置 QModem
+      # ==========================================================
+      - name: "📶 配置 QModem"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          cd "${LEDE_DIR}"
+
+          echo "=========================================="
+          echo "📶 QModem 配置"
+          echo "=========================================="
+
+          # ------------------------------------------------------
+          # 清理旧版 QModem
+          # ------------------------------------------------------
+          sed -i \
+            -e '/^CONFIG_PACKAGE_luci-app-qmodem=/d' \
+            -e '/^CONFIG_PACKAGE_luci-app-qmodem-sms=/d' \
+            -e '/^CONFIG_PACKAGE_luci-app-qmodem-ttl=/d' \
+            -e '/^CONFIG_PACKAGE_luci-i18n-qmodem-/d' \
+            -e '/^CONFIG_PACKAGE_qmodem-sipd=/d' \
+            -e '/^CONFIG_PACKAGE_qmodem-voip=/d' \
+            -e '/^CONFIG_PACKAGE_qmodem=/d' \
+            -e '/^CONFIG_PACKAGE_luci-app-qmodem-next=/d' \
+            -e '/^CONFIG_PACKAGE_sms-forwarder-next=/d' \
+            -e '/^CONFIG_PACKAGE_quectel-CM-5G-M=/d' \
+            .config
+
+          # ------------------------------------------------------
+          # 检查 QModem feed
+          #
+          # 不再使用：
+          #   grep "^Package: qmodem$"
+          #
+          # 因为 QModem Makefile 使用：
+          #   PKG_NAME:=qmodem
+          #
+          # ------------------------------------------------------
+
+          echo
+          echo "===== QModem Feed 检查 ====="
+
+          echo
+          echo "--- feeds.conf.default ---"
+          grep -n "qmodem" feeds.conf.default || true
+
+          echo
+          echo "--- feeds/qmodem ---"
+
+          if [ ! -d "feeds/qmodem" ]; then
+            echo "❌ feeds/qmodem 不存在"
+            echo
+            echo "当前 feeds："
+            ls -la feeds || true
+            exit 1
+          fi
+
+          echo "✅ feeds/qmodem 存在"
+
+          echo
+          echo "--- QModem Makefile ---"
+
+          QMODEM_FILES="$(find feeds/qmodem \
+            -type f \
+            -name Makefile \
+            2>/dev/null || true)"
+
+          if [ -z "${QMODEM_FILES}" ]; then
+            echo "❌ feeds/qmodem 中没有找到 Makefile"
+            exit 1
+          fi
+
+          echo "${QMODEM_FILES}" | head -100
+
+          echo
+          echo "--- QModem Package 定义 ---"
+
+          grep -RnsE \
+            '^[[:space:]]*PKG_NAME[[:space:]]*:=[[:space:]]*qmodem[[:space:]]*$|^[[:space:]]*define[[:space:]]+(Package|KernelPackage)/(qmodem|\$\(PKG_NAME\))([[:space:]]|$)' \
+            feeds/qmodem \
+            --include='Makefile' \
+            --include='*.mk' \
+            2>/dev/null \
+            | head -100 \
+            || true
+
+          echo
+          echo "--- 检查 qmodem ---"
+
+          if grep -RqsE \
+            '^[[:space:]]*PKG_NAME[[:space:]]*:=[[:space:]]*qmodem[[:space:]]*$|^[[:space:]]*define[[:space:]]+Package/(qmodem|\$\(PKG_NAME\))([[:space:]]|$)' \
+            feeds/qmodem \
+            --include='Makefile' \
+            --include='*.mk' \
+            2>/dev/null
+          then
+            echo "✅ 找到 QModem：qmodem"
+          else
+            echo "❌ QModem feed 中没有找到 qmodem"
+            exit 1
+          fi
+
+          echo
+          echo "--- 检查 luci-app-qmodem-next ---"
+
+          if grep -RqsE \
+            '^[[:space:]]*PKG_NAME[[:space:]]*:=[[:space:]]*luci-app-qmodem-next[[:space:]]*$|^[[:space:]]*define[[:space:]]+Package/luci-app-qmodem-next([[:space:]]|$)' \
+            feeds/qmodem \
+            --include='Makefile' \
+            --include='*.mk' \
+            2>/dev/null
+          then
+            echo "✅ 找到 QModem LuCI：luci-app-qmodem-next"
+          else
+            echo "❌ QModem feed 中没有找到 luci-app-qmodem-next"
+            exit 1
+          fi
+
+          # ------------------------------------------------------
+          # 写入 QModem
+          # ------------------------------------------------------
+          printf '%s\n' \
+            'CONFIG_PACKAGE_qmodem=y' \
+            'CONFIG_PACKAGE_luci-app-qmodem-next=y' \
+            'CONFIG_PACKAGE_sms-forwarder-next=y' \
+            'CONFIG_PACKAGE_quectel-CM-5G-M=y' \
+            '# CONFIG_PACKAGE_luci-app-qmodem is not set' \
+            '# CONFIG_PACKAGE_luci-app-qmodem-sms is not set' \
+            '# CONFIG_PACKAGE_luci-app-qmodem-ttl is not set' \
+            '# CONFIG_PACKAGE_qmodem-sipd is not set' \
+            '# CONFIG_PACKAGE_qmodem-voip is not set' \
+            >> .config
+
+          echo
+          echo "===== QModem 配置 ====="
+
+          grep -E \
+            '^CONFIG_PACKAGE_(qmodem|luci-app-qmodem|sms-forwarder-next|quectel-CM-5G-M)' \
+            .config \
+            || true
+
+          echo
+          echo "✅ QModem 配置完成"
+
+
+      # ==========================================================
+      # 16. 配置通用 WWAN 驱动
+      # ==========================================================
+      - name: "📶 配置通用 WWAN 驱动"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          cd "${LEDE_DIR}"
+
+          echo "=========================================="
+          echo "📶 通用 WWAN / 4G / 5G 驱动"
+          echo "=========================================="
+
+          # ------------------------------------------------------
+          # 查找 OpenWrt Package / KernelPackage
+          #
+          # 支持：
+          #   define Package/xxx
+          #   define KernelPackage/xxx
+          #   PKG_NAME:=xxx
+          #
+          # 对 kmod-xxx 自动同时检查：
+          #   kmod-xxx
+          #   xxx
+          # ------------------------------------------------------
+          find_pkg() {
+            local pkg="$1"
+            local name="${pkg#kmod-}"
+
+            grep -RqsE \
+              "^[[:space:]]*PKG_NAME[[:space:]]*:=[[:space:]]*(${pkg}|${name})[[:space:]]*$|^[[:space:]]*define[[:space:]]+(Package|KernelPackage)/(${pkg}|${name})([[:space:]]|$)" \
+              package \
+              feeds \
+              --include='Makefile' \
+              --include='*.mk' \
+              2>/dev/null
+          }
+
+          for pkg in \
+            kmod-usb-net \
+            kmod-usb-net-cdc-ether \
+            kmod-usb-net-cdc-mbim \
+            kmod-usb-net-cdc-ncm \
+            kmod-usb-net-rndis \
+            kmod-usb-net-qmi-wwan \
+            kmod-usb-serial \
+            kmod-usb-serial-option \
+            kmod-usb-serial-wwan \
+            kmod-usb-serial-qualcomm \
+            kmod-usb-serial-sierra \
+            kmod-usb-wdm \
+            kmod-qmi_wwan \
+            kmod-qmi_wwan_f \
+            kmod-qmi_wwan_q \
+            kmod-qmi_wwan_s \
+            kmod-mhi-bus \
+            kmod-mhi-net \
+            kmod-mhi-pci \
+            kmod-mhi-pci-generic \
+            kmod-mhi-wwan \
+            kmod-mhi-wwan-ctrl \
+            kmod-mhi-wwan-mbim
+          do
+
+            if find_pkg "${pkg}"; then
+
+              echo "CONFIG_PACKAGE_${pkg}=m" >> .config
+
+              echo "✅ ${pkg}"
+
+            else
+
+              echo "⏭️ ${pkg} 不存在，跳过"
+
+            fi
+
+          done
+          # ------------------------------------------------------
+          # PPPoE 核心包必须 =y 才能进固件
+          # ------------------------------------------------------
+          for pkg in \
+          kmod-ppp \
+          kmod-pppox \
+          kmod-pppoe \
+          ppp \
+          ppp-mod-pppoe \
+          luci-proto-ppp
+          do
+
+          if find_pkg "${pkg}"; then
+
+          sed -i "/^CONFIG_PACKAGE_${pkg}=/d" .config
+
+          echo "CONFIG_PACKAGE_${pkg}=y" >> .config
+
+          echo "✅ ${pkg} -> y"
+
+          else
+
+          echo "⏭️ ${pkg} 不存在，跳过"
+
+          fi
+
+          done
+          echo
+          echo "===== WWAN 最终配置 ====="
+
+          grep -E \
+            '^CONFIG_PACKAGE_(kmod-|ppp)' \
+            .config \
+            | sort \
+            || true
+
+          echo
+          echo "✅ WWAN 驱动配置完成"
+
+
+          # ==========================================================
+          # 17. 检查 TARGET
+          # ==========================================================
+      - name: "🎯 检查 TARGET"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          cd "${LEDE_DIR}"
+
+          case "${{ inputs.device }}" in
+
+            wh3000)
+
+              target='CONFIG_TARGET_mediatek_filogic_DEVICE_huasifei_wh3000-emmc=y'
+
+              ;;
+
+            wh3000pro)
+
+              target='CONFIG_TARGET_mediatek_filogic_DEVICE_huasifei_wh3000-pro=y'
+
+              ;;
+
+            re-sp-01b)
+
+              target='CONFIG_TARGET_ramips_mt7621_DEVICE_jdcloud_re-sp-01b=y'
+
+              ;;
+
+            *)
+
+              echo "❌ 未知设备"
+
+              exit 1
+
+              ;;
+
+          esac
+
+          echo "=========================================="
+          echo "🎯 TARGET 检查"
+          echo "=========================================="
+
+          echo "要求："
+          echo "${target}"
+
+          echo
+
+          if grep -q "^${target}$" .config; then
+
+            echo "✅ TARGET 正确"
+
+          else
+
+            echo "❌ TARGET 不正确"
+
+            echo
+            echo "当前 TARGET："
+
+            grep '^CONFIG_TARGET_' .config || true
+
+            exit 1
+
+          fi
+
+
+      # ==========================================================
+      # 18. make defconfig
+      # ==========================================================
+      - name: "⚙️ make defconfig"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          cd "${LEDE_DIR}"
+
+          make defconfig
+
+          echo "✅ make defconfig 完成"
+
+
+      # ==========================================================
+      # 19. 最终配置检查
+      # ==========================================================
+      - name: "🔍 最终配置检查"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          cd "${LEDE_DIR}"
+
+          echo "=========================================="
+          echo "🔍 最终配置检查"
+          echo "=========================================="
+
+          echo
+          echo "===== TARGET ====="
+
+          grep '^CONFIG_TARGET_' .config \
+            | head -100 \
+            || true
+
+          echo
+          echo "===== KERNEL CONFIG ====="
+
+          grep -E \
+            'CONFIG_(LINUX_6_1|LINUX_6_6|LINUX_6_12|LINUX_6_18|TESTING_KERNEL)' \
+            .config \
+            || true
+
+          echo
+          echo "===== 实际 Target Kernel ====="
+
+          case "${{ inputs.device }}" in
+
+            wh3000|wh3000pro)
+
+              grep -E \
+                '^[[:space:]]*KERNEL_PATCHVER|^[[:space:]]*KERNEL_TESTING_PATCHVER' \
+                target/linux/mediatek/Makefile \
+                || true
+
+              ;;
+
+            re-sp-01b)
+
+              grep -E \
+                '^[[:space:]]*KERNEL_PATCHVER|^[[:space:]]*KERNEL_TESTING_PATCHVER' \
+                target/linux/ramips/Makefile \
+                || true
+
+              ;;
+
+          esac
+
+          echo
+          echo "===== QModem ====="
+
+          grep -E \
+            '^CONFIG_PACKAGE_(qmodem|luci-app-qmodem-next|sms-forwarder-next|quectel-CM-5G-M)' \
+            .config \
+            || true
+
+          echo
+
+          # ------------------------------------------------------
+          # 禁止 Testing Kernel
+          # ------------------------------------------------------
+
+          if grep -q '^CONFIG_TESTING_KERNEL=y' .config; then
+
+            echo "❌ CONFIG_TESTING_KERNEL=y 被启用"
+
+            exit 1
+
+          fi
+
+          # ------------------------------------------------------
+          # 6.6 最终检查
+          # ------------------------------------------------------
+
+          if [ "${{ inputs.kernel }}" = "6.6" ]; then
+
+            case "${{ inputs.device }}" in
+
+              wh3000|wh3000pro)
+
+                if [ ! -d "target/linux/mediatek/patches-6.6" ]; then
+
+                  echo "❌ MediaTek 6.6 patchset 不存在"
+
+                  exit 1
+
+                fi
+
+                ;;
+
+              re-sp-01b)
+
+                if [ ! -d "target/linux/ramips/patches-6.6" ]; then
+
+                  echo "❌ Ramips 6.6 patchset 不存在"
+
+                  exit 1
+
+                fi
+
+                ;;
+
+            esac
+
+          fi
+
+          echo
+          echo "=========================================="
+          echo "✅ 最终配置检查通过"
+          echo "=========================================="
+
+
+      # ==========================================================
+      # 20. 保存最终 Kernel 信息
+      # ==========================================================
+      - name: "🧾 保存编译环境信息"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          cd "${LEDE_DIR}"
+
+          mkdir -p "${GITHUB_WORKSPACE}/logs"
+
+          {
+            echo "=========================================="
+            echo "MWRT-STABLE BUILD ENVIRONMENT"
+            echo "=========================================="
+            echo "Device=${{ inputs.device }}"
+            echo "KernelStrategy=${{ inputs.kernel }}"
+            echo "BuildMode=${{ inputs.build_mode }}"
+            echo "LEDE_REPO=${LEDE_REPO}"
+            echo "LEDE_BRANCH=${LEDE_BRANCH}"
+            echo "LEDE_COMMIT=${LEDE_COMMIT}"
+            echo
+
+            echo "===== TARGET KERNEL ====="
+
+            case "${{ inputs.device }}" in
+
+              wh3000|wh3000pro)
+
+                grep -E \
+                  '^[[:space:]]*KERNEL_PATCHVER|^[[:space:]]*KERNEL_TESTING_PATCHVER' \
+                  target/linux/mediatek/Makefile \
+                  || true
+
+                ;;
+
+              re-sp-01b)
+
+                grep -E \
+                  '^[[:space:]]*KERNEL_PATCHVER|^[[:space:]]*KERNEL_TESTING_PATCHVER' \
+                  target/linux/ramips/Makefile \
+                  || true
+
+                ;;
+
+            esac
+
+            echo
+            echo "===== QMODEM ====="
+
+            grep -E \
+              '^CONFIG_PACKAGE_(qmodem|luci-app-qmodem-next|sms-forwarder-next|quectel-CM-5G-M)' \
+              .config \
+              || true
+
+          } > "${GITHUB_WORKSPACE}/logs/build-environment.txt"
+
+
+      # ==========================================================
+      # 21. 下载源码包
+      # ==========================================================
+      - name: "📥 下载源码包"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          cd "${LEDE_DIR}"
+
+          make download \
+            -j"${MAKE_JOBS}" \
+            V=s
+
+          echo "✅ 源码包下载完成"
+
+
+      # ==========================================================
+      # 22. 编译固件
+      # ==========================================================
+      - name: "🏗️ 编译固件"
+        shell: bash
+        env:
+          FORCE_UNSAFE_CONFIGURE: "1"
+        run: |
+          set -Eeuo pipefail
+
+          cd "${LEDE_DIR}"
+
+          START_TIME="$(date +%s)"
+
+          echo "=========================================="
+          echo "🏗️ DONGZAI MWRT-STABLE"
+          echo "=========================================="
+
+          echo "设备：${{ inputs.device }}"
+          echo "内核策略：${{ inputs.kernel }}"
+          echo "编译模式：${{ inputs.build_mode }}"
+          echo "并行线程：${MAKE_JOBS}"
+          echo "LEDE：${LEDE_REPO}"
+          echo "分支：${LEDE_BRANCH}"
+          echo "Commit：${LEDE_COMMIT}"
+
+          echo "=========================================="
+
+          make -j"${MAKE_JOBS}" V=s
+
+          END_TIME="$(date +%s)"
+
+          BUILD_TIME="$((END_TIME - START_TIME))"
+
+          echo "BUILD_TIME=${BUILD_TIME}" >> "${GITHUB_ENV}"
+
+          echo
+          echo "=========================================="
+          echo "✅ 编译完成"
+          echo "编译耗时：${BUILD_TIME} 秒"
+          echo "=========================================="
+                # ==========================================================
+      # 23. 检查并整理固件
+      # ==========================================================
+      - name: "🔎 检查并整理固件"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          cd "${LEDE_DIR}"
+
+          rm -rf "${GITHUB_WORKSPACE}/release"
+
+          mkdir -p "${GITHUB_WORKSPACE}/release"
+
+          echo "=========================================="
+          echo "🔎 搜索编译产物"
+          echo "=========================================="
+
+          find bin/targets \
+            -type f \
+            \( \
+              -name '*.bin' \
+              -o -name '*.itb' \
+              -o -name '*.img' \
+              -o -name '*.gz' \
+              -o -name '*.zip' \
+            \) \
+            -exec cp -v {} "${GITHUB_WORKSPACE}/release/" \;
+
+          echo
+          echo "=========================================="
+          echo "📦 固件列表"
+          echo "=========================================="
+
+          ls -lah "${GITHUB_WORKSPACE}/release"
+
+          if ! find "${GITHUB_WORKSPACE}/release" \
+            -type f \
+            \( \
+              -name '*.bin' \
+              -o -name '*.itb' \
+              -o -name '*.img' \
+              -o -name '*.gz' \
+              -o -name '*.zip' \
+            \) \
+            | grep -q .
+          then
+
+            echo "❌ 没有找到固件"
+
+            exit 1
+
+          fi
+
+          # ------------------------------------------------------
+          # BUILD_INFO
+          # ------------------------------------------------------
+
+          printf '%s\n' \
+            '==========================================' \
+            'DONGZAI MWRT-STABLE' \
+            '==========================================' \
+            '' \
+            'Device:' \
+            "${{ inputs.device }}" \
+            '' \
+            'Kernel strategy:' \
+            "${{ inputs.kernel }}" \
+            '' \
+            'Build mode:' \
+            "${{ inputs.build_mode }}" \
+            '' \
+            'Build time:' \
+            "${BUILD_TIME} seconds" \
+            '' \
+            'LEDE repository:' \
+            "${LEDE_REPO}" \
+            '' \
+            'LEDE branch:' \
+            "${LEDE_BRANCH}" \
+            '' \
+            'LEDE commit:' \
+            "${LEDE_COMMIT}" \
+            '' \
+            'QModem repository:' \
+            'https://github.com/FUjr/QModem' \
+            '' \
+            'GitHub run:' \
+            "${GITHUB_RUN_NUMBER}" \
+            '' \
+            'Build date:' \
+            "$(date -u '+%Y-%m-%d %H:%M:%S UTC')" \
+            '' \
+            '==========================================' \
+            > "${GITHUB_WORKSPACE}/release/BUILD_INFO.txt"
+
+          echo
+          echo "=========================================="
+          echo "📦 BUILD_INFO"
+          echo "=========================================="
+
+          cat "${GITHUB_WORKSPACE}/release/BUILD_INFO.txt"
+
+
+      # ==========================================================
+      # 24. 上传 Actions Artifact
+      # ==========================================================
+      - name: "📤 上传 Actions Artifact"
+        uses: actions/upload-artifact@v4
+        with:
+          name: "MWRT-STABLE-${{ inputs.device }}-${{ inputs.kernel }}"
+          path: release/
+          if-no-files-found: error
+          retention-days: 7
+
+
+      # ==========================================================
+      # 25. 发布 GitHub Release
+      # ==========================================================
+      - name: "🚀 发布 GitHub Release"
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "stable-${{ inputs.device }}-${{ inputs.kernel }}-${{ github.run_number }}"
+
+          name: "MWRT-STABLE ${{ inputs.device }} / ${{ inputs.kernel }} / #${{ github.run_number }}"
+
+          body: |
+            # 🏗️ DONGZAI MWRT-STABLE
+
+            ## 编译信息
+
+            - 设备：`${{ inputs.device }}`
+            - 内核策略：`${{ inputs.kernel }}`
+            - 编译模式：`${{ inputs.build_mode }}`
+            - 编译编号：`${{ github.run_number }}`
+            - 编译耗时：`${{ env.BUILD_TIME }} 秒`
+
+            ## LEDE
+
+            - 仓库：`coolsnowwolf/lede`
+            - 分支：`master`
+            - Commit：`${{ env.LEDE_COMMIT }}`
+
+            ## QModem
+
+            官方仓库：
+            https://github.com/FUjr/QModem
+
+          files: release/*
+
+          fail_on_unmatched_files: true
+
+          generate_release_notes: false
+
+
+      # ==========================================================
+      # 26. ccache 统计
+      # ==========================================================
+      - name: "📊 ccache 统计"
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          echo "=========================================="
+          echo "📊 ccache 统计"
+          echo "=========================================="
+
+          ccache --show-stats || true
+
+
+      # ==========================================================
+      # 27. 最终诊断
+      # ==========================================================
+      - name: "🩺 最终诊断"
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          cd "${LEDE_DIR}" 2>/dev/null || exit 0
+
+          echo "=========================================="
+          echo "🩺 MWRT-STABLE 最终诊断"
+          echo "=========================================="
+
+          echo
+          echo "===== TARGET ====="
+
+          grep '^CONFIG_TARGET_' .config 2>/dev/null \
+            | head -100 \
+            || true
+
+          echo
+          echo "===== KERNEL CONFIG ====="
+
+          grep -E \
+            'CONFIG_(LINUX_6_1|LINUX_6_6|LINUX_6_12|LINUX_6_18|TESTING_KERNEL)' \
+            .config 2>/dev/null \
+            || true
+
+          echo
+          echo "===== TARGET KERNEL ====="
+
+          case "${{ inputs.device }}" in
+
+            wh3000|wh3000pro)
+
+              grep -E \
+                '^[[:space:]]*KERNEL_PATCHVER|^[[:space:]]*KERNEL_TESTING_PATCHVER' \
+                target/linux/mediatek/Makefile \
+                2>/dev/null \
+                || true
+
+              ;;
+
+            re-sp-01b)
+
+              grep -E \
+                '^[[:space:]]*KERNEL_PATCHVER|^[[:space:]]*KERNEL_TESTING_PATCHVER' \
+                target/linux/ramips/Makefile \
+                2>/dev/null \
+                || true
+
+              ;;
+
+          esac
+
+          echo
+          echo "===== QModem ====="
+
+          grep -E \
+            '^CONFIG_PACKAGE_(qmodem|luci-app-qmodem-next|sms-forwarder-next|quectel-CM-5G-M)' \
+            .config 2>/dev/null \
+            || true
+
+          echo
+          echo "===== WWAN ====="
+
+          grep -E \
+            '^CONFIG_PACKAGE_(kmod-usb-net|kmod-usb-net-qmi-wwan|kmod-usb-net-cdc-mbim|kmod-usb-serial|kmod-mhi|ppp)' \
+            .config 2>/dev/null \
+            | head -100 \
+            || true
+
+          echo
+          echo "===== Patch reject ====="
+
+          find build_dir \
+            -type f \
+            -name '*.rej' \
+            2>/dev/null \
+            | head -100 \
+            || true
+
+
+      # ==========================================================
+      # 28. 上传失败日志
+      # ==========================================================
+      - name: "🧾 上传失败日志"
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: "MWRT-STABLE-failure-${{ github.run_number }}"
+
+          path: |
+            openwrt/.config
+            openwrt/tmp/
+            openwrt/logs/
+            openwrt/build_dir/**/.rej
+            logs/
+
+          if-no-files-found: ignore
+
+          retention-days: 7
+          
