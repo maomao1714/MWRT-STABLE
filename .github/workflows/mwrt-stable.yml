@@ -46,9 +46,9 @@ jobs:
     name: "${{ inputs.device }} / Linux ${{ inputs.kernel }}"
     runs-on: ubuntu-22.04
     timeout-minutes: 360
-
+    
     steps:
-      - name: "📥 Checkout"
+      - name: " Checkout"
         uses: actions/checkout@v4
 
 
