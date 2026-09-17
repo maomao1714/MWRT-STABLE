@@ -1,0 +1,51 @@
+name: "🔍 校验工作流 YAML"
+
+on:
+  workflow_dispatch:
+    inputs:
+      workflow_file:
+        description: "要校验的工作流文件路径"
+        required: true
+        default: ".github/workflows/mwrt-stable.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: "校验并修复"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: "📥 Checkout"
+        uses: actions/checkout@v4
+
+      - name: "🐍 安装 PyYAML"
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install pyyaml
+
+      - name: "🔍 校验并修复"
+        id: check
+        continue-on-error: true
+        run: |
+          python3 tools/check-workflow.py "${{ inputs.workflow_file }}" --fix
+
+      - name: "📤 上传修复后的文件"
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fixed-workflow-${{ github.run_number }}
+          path: ${{ inputs.workflow_file }}
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: "📋 结果"
+        if: always()
+        run: |
+          if [ "${{ steps.check.outcome }}" = "success" ]; then
+            echo "✅ 校验通过或已修复"
+          else
+            echo "⚠️ 发现问题，请查看上面的日志"
+          fi
