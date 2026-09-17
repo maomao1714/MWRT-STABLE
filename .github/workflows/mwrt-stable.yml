@@ -919,9 +919,6 @@ jobs:
             kmod-qmi_wwan_f \
             kmod-qmi_wwan_q \
             kmod-qmi_wwan_s \
-            kmod-ppp \
-            ppp \
-            ppp-mod-pppoe \
             kmod-mhi-bus \
             kmod-mhi-net \
             kmod-mhi-pci \
@@ -944,7 +941,33 @@ jobs:
             fi
 
           done
+# ------------------------------------------------------
+# PPPoE 核心包必须 =y 才能进固件
+# ------------------------------------------------------
+       for pkg in \
+        kmod-ppp \
+        kmod-pppox \
+        kmod-pppoe \
+        ppp \
+        ppp-mod-pppoe \
+        luci-proto-ppp
+       do
 
+       if find_pkg "${pkg}"; then
+
+       sed -i "/^CONFIG_PACKAGE_${pkg}=/d" .config
+
+       echo "CONFIG_PACKAGE_${pkg}=y" >> .config
+
+       echo "✅ ${pkg} -> y"
+
+       else
+
+       echo "⏭️ ${pkg} 不存在，跳过"
+
+       fi
+
+       done
           echo
           echo "===== WWAN 最终配置 ====="
 
