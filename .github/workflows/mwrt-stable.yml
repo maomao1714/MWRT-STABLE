@@ -46,15 +46,12 @@ jobs:
     name: "${{ inputs.device }} / Linux ${{ inputs.kernel }}"
     runs-on: ubuntu-22.04
     timeout-minutes: 360
-    
+
     steps:
-      - name: " Checkout"
+
+      - name: "📥 Checkout"
         uses: actions/checkout@v4
 
-
-      # ==========================================================
-      # 02. 清理旧工作目录
-      # ==========================================================
       - name: "🧹 清理旧工作目录"
         if: inputs.build_mode == 'clean'
         shell: bash
@@ -66,10 +63,6 @@ jobs:
 
           echo "✅ Clean 模式清理完成"
 
-
-      # ==========================================================
-      # 03. Runner 状态
-      # ==========================================================
       - name: "💽 检查磁盘与内存"
         shell: bash
         run: |
@@ -88,10 +81,6 @@ jobs:
 
           free -h
 
-
-      # ==========================================================
-      # 04. 安装编译依赖
-      # ==========================================================
       - name: "🧰 安装编译依赖"
         shell: bash
         run: |
@@ -157,10 +146,6 @@ jobs:
             xsltproc \
             zlib1g-dev
 
-
-      # ==========================================================
-      # 05. 配置 ccache
-      # ==========================================================
       - name: "📦 配置 ccache"
         shell: bash
         run: |
@@ -178,10 +163,6 @@ jobs:
 
           ccache --show-config
 
-
-      # ==========================================================
-      # 06. ccache 缓存
-      # ==========================================================
       - name: "💾 恢复 ccache"
         uses: actions/cache@v4
         with:
@@ -192,10 +173,6 @@ jobs:
             mwrt-stable-ccache-${{ runner.os }}-
             mwrt-stable-ccache-
 
-
-      # ==========================================================
-      # 07. 获取 LEDE master
-      # ==========================================================
       - name: "📥 获取 LEDE master"
         shell: bash
         run: |
@@ -228,10 +205,6 @@ jobs:
 
           git log -1 --oneline
 
-
-      # ==========================================================
-      # 08. 基础文件检查
-      # ==========================================================
       - name: "🔎 检查基础文件"
         shell: bash
         run: |
@@ -261,10 +234,6 @@ jobs:
           echo
           echo "✅ 基础文件检查完成"
 
-
-      # ==========================================================
-      # 09. 加载设备配置
-      # ==========================================================
       - name: "📦 加载设备配置"
         shell: bash
         run: |
@@ -275,31 +244,21 @@ jobs:
           case "${{ inputs.device }}" in
 
             wh3000)
-
               CONFIG_FILE="${GITHUB_WORKSPACE}/wh3000.config"
-
               ;;
 
             wh3000pro)
-
               CONFIG_FILE="${GITHUB_WORKSPACE}/wh3000pro.config"
-
               ;;
 
             re-sp-01b)
-
               CONFIG_FILE="${GITHUB_WORKSPACE}/re-sp-01b.config"
-
               ;;
 
             *)
-
               echo "❌ 未知设备：${{ inputs.device }}"
-
               exit 1
-
               ;;
-
           esac
 
           if [ ! -f "${CONFIG_FILE}" ]; then
@@ -329,10 +288,6 @@ jobs:
             .config \
             || true
 
-
-      # ==========================================================
-      # 10. Kernel 基线检查
-      # ==========================================================
       - name: "🐧 Kernel 基线检查"
         shell: bash
         run: |
@@ -353,34 +308,24 @@ jobs:
           case "${DEVICE}" in
 
             wh3000|wh3000pro)
-
               TARGET_MAKEFILE="target/linux/mediatek/Makefile"
               TARGET_DIR="target/linux/mediatek"
-
               ;;
 
             re-sp-01b)
-
               TARGET_MAKEFILE="target/linux/ramips/Makefile"
               TARGET_DIR="target/linux/ramips"
-
               ;;
 
             *)
-
               echo "❌ 未知设备"
               exit 1
-
               ;;
-
           esac
 
           if [ ! -f "${TARGET_MAKEFILE}" ]; then
-
             echo "❌ 找不到：${TARGET_MAKEFILE}"
-
             exit 1
-
           fi
 
           echo
@@ -395,13 +340,11 @@ jobs:
           echo "===== Generic Kernel ====="
 
           for V in 6.1 6.6; do
-
             if [ -f "target/linux/generic/config-${V}" ]; then
               echo "✅ generic/config-${V}"
             else
               echo "⚠️ generic/config-${V} 不存在"
             fi
-
           done
 
           echo
@@ -419,10 +362,6 @@ jobs:
             echo "⚠️ ${TARGET_DIR}/patches-6.1 不存在"
           fi
 
-
-      # ==========================================================
-      # 11. 设置实际 Kernel
-      # ==========================================================
       - name: "🧠 设置内核策略"
         shell: bash
         run: |
@@ -436,26 +375,19 @@ jobs:
           case "${DEVICE}" in
 
             wh3000|wh3000pro)
-
               TARGET_MAKEFILE="target/linux/mediatek/Makefile"
               TARGET_DIR="target/linux/mediatek"
-
               ;;
 
             re-sp-01b)
-
               TARGET_MAKEFILE="target/linux/ramips/Makefile"
               TARGET_DIR="target/linux/ramips"
-
               ;;
 
             *)
-
               echo "❌ 未知设备"
               exit 1
-
               ;;
-
           esac
 
           echo "=========================================="
@@ -464,10 +396,6 @@ jobs:
 
           echo "Device : ${DEVICE}"
           echo "Kernel : ${KERNEL}"
-
-          # ------------------------------------------------------
-          # 清理配置文件中错误的 Kernel 强制项
-          # ------------------------------------------------------
 
           sed -i \
             -e '/^CONFIG_TESTING_KERNEL=/d' \
@@ -479,14 +407,9 @@ jobs:
 
           echo "# CONFIG_TESTING_KERNEL is not set" >> .config
 
-          # ------------------------------------------------------
-          # 选择 Kernel
-          # ------------------------------------------------------
-
           case "${KERNEL}" in
 
             "latest")
-
               echo
               echo "✅ 使用 LEDE master 当前 Target 默认稳定 Kernel"
 
@@ -494,24 +417,19 @@ jobs:
                 '^[[:space:]]*KERNEL_PATCHVER' \
                 "${TARGET_MAKEFILE}" \
                 || true
-
               ;;
 
             "6.6")
-
               echo
               echo "🔎 检查 Target 6.6 patchset"
 
               if [ ! -d "${TARGET_DIR}/patches-6.6" ]; then
-
                 echo
                 echo "❌ 当前源码没有："
                 echo "   ${TARGET_DIR}/patches-6.6"
-
                 echo
                 echo "❌ 不能只写 CONFIG_LINUX_6_6=y"
                 echo "❌ 那样不能保证实际 Kernel 为 6.6"
-
                 echo
                 echo "当前 Target Kernel："
 
@@ -522,9 +440,7 @@ jobs:
 
                 echo
                 echo "⛔ 为避免编译到 Kernel patch 阶段才失败，本次停止。"
-
                 exit 1
-
               fi
 
               echo
@@ -533,17 +449,12 @@ jobs:
               sed -i \
                 's/^KERNEL_PATCHVER:=.*/KERNEL_PATCHVER:=6.6/' \
                 "${TARGET_MAKEFILE}"
-
               ;;
 
             *)
-
               echo "❌ 无效 Kernel：${KERNEL}"
-
               exit 1
-
               ;;
-
           esac
 
           echo
@@ -554,10 +465,6 @@ jobs:
             "${TARGET_MAKEFILE}" \
             || true
 
-
-      # ==========================================================
-      # 12. 执行 DIY1
-      # ==========================================================
       - name: "🔧 执行 DIY1"
         shell: bash
         run: |
@@ -578,10 +485,6 @@ jobs:
 
           echo "✅ DIY1 执行完成"
 
-
-            # ==========================================================
-      # 13. 更新并安装 feeds
-      # ==========================================================
       - name: "📡 更新并安装 feeds"
         shell: bash
         run: |
@@ -592,25 +495,6 @@ jobs:
           echo "=========================================="
           echo "📡 更新并安装 feeds"
           echo "=========================================="
-
-          # ------------------------------------------------------
-          # 关键修复
-          #
-          # scripts/feeds update 会自动执行 refresh_config()
-          # / make defconfig。
-          #
-          # 此时如果 .config 已经存在，而 feeds 尚未全部准备好，
-          # Docker / Lucky / Design / QModem 等 feed 包配置可能
-          # 被 Kconfig 当成不存在项目而清掉。
-          #
-          # 因此：
-          #   1. 暂时保存设备完整 .config
-          #   2. 删除工作中的 .config
-          #   3. 完成全部 feeds update / install
-          #   4. 恢复设备完整 .config
-          #
-          # 这样不会改变原始设备配置内容。
-          # ------------------------------------------------------
 
           if [ ! -f .config ]; then
             echo "❌ 找不到当前设备 .config"
@@ -635,10 +519,6 @@ jobs:
 
           ./scripts/feeds install -a
 
-          # ------------------------------------------------------
-          # QModem 官方 feed 再单独确认一次
-          # ------------------------------------------------------
-
           echo
           echo "===== 更新 QModem feed ====="
 
@@ -648,10 +528,6 @@ jobs:
           echo "===== 安装 QModem ====="
 
           ./scripts/feeds install -a -p qmodem
-
-          # ------------------------------------------------------
-          # 所有 feeds 完成后恢复设备配置
-          # ------------------------------------------------------
 
           if [ ! -f .config.device ]; then
             echo "❌ .config.device 不存在"
@@ -686,7 +562,7 @@ jobs:
           echo
           echo "===== QModem ====="
           grep -E \
-            '^CONFIG_PACKAGE_(qmodem|luci-app-qmodem-next|sms-forwarder-next|sms-forwarder-next|quectel-CM-5G-M)=' \
+            '^CONFIG_PACKAGE_(qmodem|luci-app-qmodem-next|sms-forwarder-next|quectel-CM-5G-M)=' \
             .config \
             || true
 
@@ -696,10 +572,6 @@ jobs:
           echo "✅ 设备 .config 已恢复"
           echo "=========================================="
 
-
-      # ==========================================================
-      # 14. 执行 DIY2
-      # ==========================================================
       - name: "🔧 执行 DIY2"
         shell: bash
         run: |
@@ -712,9 +584,7 @@ jobs:
           bash "${GITHUB_WORKSPACE}/diy-part2.sh"
 
           echo "✅ DIY2 执行完成"
-      # ==========================================================
-      # 15. 配置 QModem
-      # ==========================================================
+
       - name: "📶 配置 QModem"
         shell: bash
         run: |
@@ -726,9 +596,6 @@ jobs:
           echo "📶 QModem 配置"
           echo "=========================================="
 
-          # ------------------------------------------------------
-          # 清理旧版 QModem
-          # ------------------------------------------------------
           sed -i \
             -e '/^CONFIG_PACKAGE_luci-app-qmodem=/d' \
             -e '/^CONFIG_PACKAGE_luci-app-qmodem-sms=/d' \
@@ -741,17 +608,6 @@ jobs:
             -e '/^CONFIG_PACKAGE_sms-forwarder-next=/d' \
             -e '/^CONFIG_PACKAGE_quectel-CM-5G-M=/d' \
             .config
-
-          # ------------------------------------------------------
-          # 检查 QModem feed
-          #
-          # 不再使用：
-          #   grep "^Package: qmodem$"
-          #
-          # 因为 QModem Makefile 使用：
-          #   PKG_NAME:=qmodem
-          #
-          # ------------------------------------------------------
 
           echo
           echo "===== QModem Feed 检查 ====="
@@ -832,9 +688,6 @@ jobs:
             exit 1
           fi
 
-          # ------------------------------------------------------
-          # 写入 QModem
-          # ------------------------------------------------------
           printf '%s\n' \
             'CONFIG_PACKAGE_qmodem=y' \
             'CONFIG_PACKAGE_luci-app-qmodem-next=y' \
@@ -858,10 +711,6 @@ jobs:
           echo
           echo "✅ QModem 配置完成"
 
-
-      # ==========================================================
-      # 16. 配置通用 WWAN 驱动
-      # ==========================================================
       - name: "📶 配置通用 WWAN 驱动"
         shell: bash
         run: |
@@ -873,18 +722,6 @@ jobs:
           echo "📶 通用 WWAN / 4G / 5G 驱动"
           echo "=========================================="
 
-          # ------------------------------------------------------
-          # 查找 OpenWrt Package / KernelPackage
-          #
-          # 支持：
-          #   define Package/xxx
-          #   define KernelPackage/xxx
-          #   PKG_NAME:=xxx
-          #
-          # 对 kmod-xxx 自动同时检查：
-          #   kmod-xxx
-          #   xxx
-          # ------------------------------------------------------
           find_pkg() {
             local pkg="$1"
             local name="${pkg#kmod-}"
@@ -925,45 +762,33 @@ jobs:
           do
 
             if find_pkg "${pkg}"; then
-
               echo "CONFIG_PACKAGE_${pkg}=m" >> .config
-
               echo "✅ ${pkg}"
-
             else
-
               echo "⏭️ ${pkg} 不存在，跳过"
-
             fi
 
           done
-# ------------------------------------------------------
-# PPPoE 核心包必须 =y 才能进固件
-# ------------------------------------------------------
-       for pkg in \
-        kmod-ppp \
-        kmod-pppox \
-        kmod-pppoe \
-        ppp \
-        ppp-mod-pppoe \
-        luci-proto-ppp
-       do
 
-       if find_pkg "${pkg}"; then
+          for pkg in \
+            kmod-ppp \
+            kmod-pppox \
+            kmod-pppoe \
+            ppp \
+            ppp-mod-pppoe \
+            luci-proto-ppp
+          do
 
-       sed -i "/^CONFIG_PACKAGE_${pkg}=/d" .config
+            if find_pkg "${pkg}"; then
+              sed -i "/^CONFIG_PACKAGE_${pkg}=/d" .config
+              echo "CONFIG_PACKAGE_${pkg}=y" >> .config
+              echo "✅ ${pkg} -> y"
+            else
+              echo "⏭️ ${pkg} 不存在，跳过"
+            fi
 
-       echo "CONFIG_PACKAGE_${pkg}=y" >> .config
+          done
 
-       echo "✅ ${pkg} -> y"
-
-       else
-
-       echo "⏭️ ${pkg} 不存在，跳过"
-
-       fi
-
-       done
           echo
           echo "===== WWAN 最终配置 ====="
 
@@ -976,10 +801,6 @@ jobs:
           echo
           echo "✅ WWAN 驱动配置完成"
 
-
-      # ==========================================================
-      # 17. 检查 TARGET
-      # ==========================================================
       - name: "🎯 检查 TARGET"
         shell: bash
         run: |
@@ -990,31 +811,21 @@ jobs:
           case "${{ inputs.device }}" in
 
             wh3000)
-
               target='CONFIG_TARGET_mediatek_filogic_DEVICE_huasifei_wh3000-emmc=y'
-
               ;;
 
             wh3000pro)
-
               target='CONFIG_TARGET_mediatek_filogic_DEVICE_huasifei_wh3000-pro=y'
-
               ;;
 
             re-sp-01b)
-
               target='CONFIG_TARGET_ramips_mt7621_DEVICE_jdcloud_re-sp-01b=y'
-
               ;;
 
             *)
-
               echo "❌ 未知设备"
-
               exit 1
-
               ;;
-
           esac
 
           echo "=========================================="
@@ -1027,26 +838,15 @@ jobs:
           echo
 
           if grep -q "^${target}$" .config; then
-
             echo "✅ TARGET 正确"
-
           else
-
             echo "❌ TARGET 不正确"
-
             echo
             echo "当前 TARGET："
-
             grep '^CONFIG_TARGET_' .config || true
-
             exit 1
-
           fi
 
-
-      # ==========================================================
-      # 18. make defconfig
-      # ==========================================================
       - name: "⚙️ make defconfig"
         shell: bash
         run: |
@@ -1058,10 +858,6 @@ jobs:
 
           echo "✅ make defconfig 完成"
 
-
-      # ==========================================================
-      # 19. 最终配置检查
-      # ==========================================================
       - name: "🔍 最终配置检查"
         shell: bash
         run: |
@@ -1094,23 +890,18 @@ jobs:
           case "${{ inputs.device }}" in
 
             wh3000|wh3000pro)
-
               grep -E \
                 '^[[:space:]]*KERNEL_PATCHVER|^[[:space:]]*KERNEL_TESTING_PATCHVER' \
                 target/linux/mediatek/Makefile \
                 || true
-
               ;;
 
             re-sp-01b)
-
               grep -E \
                 '^[[:space:]]*KERNEL_PATCHVER|^[[:space:]]*KERNEL_TESTING_PATCHVER' \
                 target/linux/ramips/Makefile \
                 || true
-
               ;;
-
           esac
 
           echo
@@ -1123,52 +914,29 @@ jobs:
 
           echo
 
-          # ------------------------------------------------------
-          # 禁止 Testing Kernel
-          # ------------------------------------------------------
-
           if grep -q '^CONFIG_TESTING_KERNEL=y' .config; then
-
             echo "❌ CONFIG_TESTING_KERNEL=y 被启用"
-
             exit 1
-
           fi
-
-          # ------------------------------------------------------
-          # 6.6 最终检查
-          # ------------------------------------------------------
 
           if [ "${{ inputs.kernel }}" = "6.6" ]; then
 
             case "${{ inputs.device }}" in
 
               wh3000|wh3000pro)
-
                 if [ ! -d "target/linux/mediatek/patches-6.6" ]; then
-
                   echo "❌ MediaTek 6.6 patchset 不存在"
-
                   exit 1
-
                 fi
-
                 ;;
 
               re-sp-01b)
-
                 if [ ! -d "target/linux/ramips/patches-6.6" ]; then
-
                   echo "❌ Ramips 6.6 patchset 不存在"
-
                   exit 1
-
                 fi
-
                 ;;
-
             esac
-
           fi
 
           echo
@@ -1176,10 +944,6 @@ jobs:
           echo "✅ 最终配置检查通过"
           echo "=========================================="
 
-
-      # ==========================================================
-      # 20. 保存最终 Kernel 信息
-      # ==========================================================
       - name: "🧾 保存编译环境信息"
         shell: bash
         run: |
@@ -1206,23 +970,18 @@ jobs:
             case "${{ inputs.device }}" in
 
               wh3000|wh3000pro)
-
                 grep -E \
                   '^[[:space:]]*KERNEL_PATCHVER|^[[:space:]]*KERNEL_TESTING_PATCHVER' \
                   target/linux/mediatek/Makefile \
                   || true
-
                 ;;
 
               re-sp-01b)
-
                 grep -E \
                   '^[[:space:]]*KERNEL_PATCHVER|^[[:space:]]*KERNEL_TESTING_PATCHVER' \
                   target/linux/ramips/Makefile \
                   || true
-
                 ;;
-
             esac
 
             echo
@@ -1235,10 +994,6 @@ jobs:
 
           } > "${GITHUB_WORKSPACE}/logs/build-environment.txt"
 
-
-      # ==========================================================
-      # 21. 下载源码包
-      # ==========================================================
       - name: "📥 下载源码包"
         shell: bash
         run: |
@@ -1252,10 +1007,6 @@ jobs:
 
           echo "✅ 源码包下载完成"
 
-
-      # ==========================================================
-      # 22. 编译固件
-      # ==========================================================
       - name: "🏗️ 编译固件"
         shell: bash
         env:
@@ -1294,9 +1045,7 @@ jobs:
           echo "✅ 编译完成"
           echo "编译耗时：${BUILD_TIME} 秒"
           echo "=========================================="
-                # ==========================================================
-      # 23. 检查并整理固件
-      # ==========================================================
+
       - name: "🔎 检查并整理固件"
         shell: bash
         run: |
@@ -1341,16 +1090,9 @@ jobs:
             \) \
             | grep -q .
           then
-
             echo "❌ 没有找到固件"
-
             exit 1
-
           fi
-
-          # ------------------------------------------------------
-          # BUILD_INFO
-          # ------------------------------------------------------
 
           printf '%s\n' \
             '==========================================' \
@@ -1397,10 +1139,6 @@ jobs:
 
           cat "${GITHUB_WORKSPACE}/release/BUILD_INFO.txt"
 
-
-      # ==========================================================
-      # 24. 上传 Actions Artifact
-      # ==========================================================
       - name: "📤 上传 Actions Artifact"
         uses: actions/upload-artifact@v4
         with:
@@ -1409,10 +1147,6 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-
-      # ==========================================================
-      # 25. 发布 GitHub Release
-      # ==========================================================
       - name: "🚀 发布 GitHub Release"
         uses: softprops/action-gh-release@v2
         with:
@@ -1448,10 +1182,6 @@ jobs:
 
           generate_release_notes: false
 
-
-      # ==========================================================
-      # 26. ccache 统计
-      # ==========================================================
       - name: "📊 ccache 统计"
         if: always()
         shell: bash
@@ -1464,10 +1194,6 @@ jobs:
 
           ccache --show-stats || true
 
-
-      # ==========================================================
-      # 27. 最终诊断
-      # ==========================================================
       - name: "🩺 最终诊断"
         if: always()
         shell: bash
@@ -1501,25 +1227,20 @@ jobs:
           case "${{ inputs.device }}" in
 
             wh3000|wh3000pro)
-
               grep -E \
                 '^[[:space:]]*KERNEL_PATCHVER|^[[:space:]]*KERNEL_TESTING_PATCHVER' \
                 target/linux/mediatek/Makefile \
                 2>/dev/null \
                 || true
-
               ;;
 
             re-sp-01b)
-
               grep -E \
                 '^[[:space:]]*KERNEL_PATCHVER|^[[:space:]]*KERNEL_TESTING_PATCHVER' \
                 target/linux/ramips/Makefile \
                 2>/dev/null \
                 || true
-
               ;;
-
           esac
 
           echo
@@ -1549,10 +1270,6 @@ jobs:
             | head -100 \
             || true
 
-
-      # ==========================================================
-      # 28. 上传失败日志
-      # ==========================================================
       - name: "🧾 上传失败日志"
         if: failure()
         uses: actions/upload-artifact@v4
@@ -1568,5 +1285,4 @@ jobs:
 
           if-no-files-found: ignore
 
-          retention-days: 7
-          
+          retention-days: 15
