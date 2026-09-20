@@ -675,12 +675,14 @@ jobs:
           echo
           echo "--- 检查 luci-app-qmodem-next ---"
 
-          if grep -RqsE \
-            '^[[:space:]]*PKG_NAME[[:space:]]*:=[[:space:]]*luci-app-qmodem-next[[:space:]]*$|^[[:space:]]*define[[:space:]]+Package/luci-app-qmodem-next([[:space:]]|$)' \
-            feeds/qmodem \
-            --include='Makefile' \
-            --include='*.mk' \
-            2>/dev/null
+          if [ -d "feeds/qmodem/luci/luci-app-qmodem-next" ] \
+            || [ -f "feeds/qmodem/luci/luci-app-qmodem-next/Makefile" ] \
+            || grep -RqsE \
+              '^[[:space:]]*PKG_NAME[[:space:]]*:=[[:space:]]*luci-app-qmodem-next[[:space:]]*$|^[[:space:]]*define[[:space:]]+Package/luci-app-qmodem-next([[:space:]]|$)' \
+              feeds/qmodem \
+              --include='Makefile' \
+              --include='*.mk' \
+              2>/dev/null
           then
             echo "✅ 找到 QModem LuCI：luci-app-qmodem-next"
           else
