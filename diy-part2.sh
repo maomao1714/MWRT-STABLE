@@ -1016,6 +1016,112 @@ chmod +x files/etc/init.d/msd_lite
 
 echo ">>> [9-2] msd_lite 双后端 init.d 写入完成"
 # ════════════════════════════════════════════════════════════
+
+# ════════════════════════════════════════════════════════════
+# ddns-go
+# 注入配置文件和启动脚本（feed 包可能未包含这些文件）
+# ════════════════════════════════════════════════════════════
+
+echo ">>> [ddns-go] 注入配置文件和启动脚本..."
+
+# 确保 ddns-go 核心包被显式启用
+sed -i "/^CONFIG_PACKAGE_ddns-go=/d" .config
+echo "CONFIG_PACKAGE_ddns-go=y" >> .config
+echo ">>> [ddns-go] CONFIG_PACKAGE_ddns-go=y 已写入"
+
+# 创建 ddns-go UCI 配置文件
+cat > files/etc/config/ddns-go << 'DDNSEOF'
+config ddns-go 'ddns-go'
+	option enabled '1'
+	option listen_port '9876'
+	option web_port '9876'
+	option username ''
+	option password ''
+	option dns_server ''
+	option dns_server_port '53'
+	option dns_timeout '5'
+	option ddns_provider 'alidns'
+	option access_key_id ''
+	option access_key_secret ''
+	option domain ''
+	option sub_domain ''
+	option interface_enable '0'
+	option interface_name ''
+	option ip_type '4'
+	option ip_version '4'
+	option webhook_url ''
+	option webhook_request_method 'GET'
+	option webhook_request_body ''
+	option webhook_timeout '5'
+DDNSEOF
+
+echo ">>> [ddns-go] /etc/config/ddns-go 已创建"
+
+# 创建 ddns-go 启动脚本
+cat > files/etc/init.d/ddns-go << 'DDNSEOF'
+#!/bin/sh /etc/rc.common
+# SPDX-License-Identifier: GPL-2.0-only
+# ddns-go init script
+
+START=99
+STOP=10
+USE_PROCD=1
+
+PROG=/usr/bin/ddns-go
+PIDFILE=/var/run/ddns-go.pid
+
+start_service() {
+    config_load ddns-go
+    config_get enabled ddns-go enabled "0"
+
+    [ "$enabled" = "1" ] || return 0
+
+    procd_open_instance
+    procd_set_param command "$PROG"
+    procd_set_param pidfile "$PIDFILE"
+    procd_set_param respawn
+    procd_set_param stdout 1
+    procd_set_param stderr 1
+    procd_close_instance
+}
+
+stop_service() {
+    killall ddns-go 2>/dev/null
+    return 0
+}
+
+reload_service() {
+    stop
+    start
+}
+DDNSEOF
+
+chmod +x files/etc/init.d/ddns-go
+echo ">>> [ddns-go] /etc/init.d/ddns-go 已创建并设置可执行权限"
+
+# 创建 uci-defaults 脚本：首次启动时自动启用 ddns-go 服务
+mkdir -p files/etc/uci-defaults
+
+cat > files/etc/uci-defaults/40-ddns-go << 'DDNSEOF'
+#!/bin/sh
+
+# 自动启用 ddns-go 服务
+if [ -x /etc/init.d/ddns-go ]; then
+    /etc/init.d/ddns-go enable
+    /etc/init.d/ddns-go start
+    logger -t ddns-go "服务已自动启用并启动"
+fi
+
+exit 0
+DDNSEOF
+
+chmod +x files/etc/uci-defaults/40-ddns-go
+echo ">>> [ddns-go] uci-defaults 脚本已创建"
+
+echo ">>> [ddns-go] 配置注入完成"
+
+
+# ════════════════════════════════════════════════════════════
 # 设备专属设置
 # ════════════════════════════════════════════════════════════
 
@@ -1543,4 +1649,5 @@ echo " APN补丁  : 移动/联通/电信/广电 自动识别"
 echo " IPTV     : msd_lite + rtp2httpd"
 echo " WiFi     : 当前 LEDE"
 echo " OpenVPN  : 当前 LEDE 原生配置"
+echo " ddns-go  : 配置文件 + 启动脚本 + 自动启用"
 echo "========================================"
