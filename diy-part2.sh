@@ -1018,16 +1018,17 @@ echo ">>> [9-2] msd_lite 双后端 init.d 写入完成"
 # ════════════════════════════════════════════════════════════
 
 # ════════════════════════════════════════════════════════════
-# ddns-go
+# ddns-go 终极修复版：绕过 UCI 连字符问题
 # 注入配置文件和启动脚本（feed 包可能未包含这些文件）
 # ════════════════════════════════════════════════════════════
 
-echo ">>> [ddns-go] 注入配置文件和启动脚本..."
+echo ">>> [ddns-go] 注入编译配置和系统文件..."
 
-# 确保 ddns-go 核心包被显式启用
+# 1. 确保核心包被编译
 sed -i "/^CONFIG_PACKAGE_ddns-go=/d" .config
 echo "CONFIG_PACKAGE_ddns-go=y" >> .config
 echo ">>> [ddns-go] CONFIG_PACKAGE_ddns-go=y 已写入"
+
 # 强制编译 luci-app-ddns-go LuCI 界面及其官方中文语言包
 # 解决编译时 luci-app-ddns-go 因依赖不满足被跳过、导致 LuCI 界面 RPC 报错的问题
 sed -i "/^CONFIG_PACKAGE_luci-app-ddns-go=/d" .config
@@ -1037,56 +1038,35 @@ sed -i "/^CONFIG_PACKAGE_luci-i18n-ddns-go-zh-cn=/d" .config
 echo "CONFIG_PACKAGE_luci-i18n-ddns-go-zh-cn=y" >> .config
 echo ">>> [ddns-go] CONFIG_PACKAGE_luci-i18n-ddns-go-zh-cn=y 已写入"
 
-# 创建 ddns-go UCI 配置文件
-cat > files/etc/config/ddns-go << 'DDNSEOF'
-config ddns-go 'ddns-go'
+# 2. 为 LuCI 提供一个占位配置，防止界面报错（使用下划线命名绕过连字符问题）
+mkdir -p files/etc/config
+
+cat > files/etc/config/ddns_go << 'DDNSEOF'
+config ddns_go 'ddns_go'
 	option enabled '1'
 	option listen_port '9876'
-	option web_port '9876'
-	option username ''
-	option password ''
-	option dns_server ''
-	option dns_server_port '53'
-	option dns_timeout '5'
-	option ddns_provider 'alidns'
-	option access_key_id ''
-	option access_key_secret ''
-	option domain ''
-	option sub_domain ''
-	option interface_enable '0'
-	option interface_name ''
-	option ip_type '4'
-	option ip_version '4'
-	option webhook_url ''
-	option webhook_request_method 'GET'
-	option webhook_request_body ''
-	option webhook_timeout '5'
 DDNSEOF
 
-echo ">>> [ddns-go] /etc/config/ddns-go 已创建"
+echo ">>> [ddns-go] /etc/config/ddns_go 占位配置已创建"
 
-# 创建 ddns-go 启动脚本
-cat > files/etc/init.d/ddns-go << 'DDNSEOF'
+# 3. 强力启动脚本，彻底舍弃 UCI 检查逻辑
+mkdir -p files/etc/init.d
+
+cat > files/etc/init.d/ddns_go << 'DDNSEOF'
 #!/bin/sh /etc/rc.common
 # SPDX-License-Identifier: GPL-2.0-only
-# ddns-go init script
+# ddns-go init script (ultimate fix - bypass UCI)
 
 START=99
 STOP=10
 USE_PROCD=1
 
 PROG=/usr/bin/ddns-go
-PIDFILE=/var/run/ddns-go.pid
 
 start_service() {
-    config_load ddns-go
-    config_get enabled ddns-go enabled "0"
-
-    [ "$enabled" = "1" ] || return 0
-
     procd_open_instance
-    procd_set_param command "$PROG"
-    procd_set_param pidfile "$PIDFILE"
+    # 直接监听 9876 端口，不读 UCI 配置
+    procd_set_param command "$PROG" -l "0.0.0.0:9876"
     procd_set_param respawn
     procd_set_param stdout 1
     procd_set_param stderr 1
@@ -1094,8 +1074,7 @@ start_service() {
 }
 
 stop_service() {
-    killall ddns-go 2>/dev/null
-    return 0
+    procd_kill "ddns-go"
 }
 
 reload_service() {
@@ -1104,29 +1083,25 @@ reload_service() {
 }
 DDNSEOF
 
-chmod +x files/etc/init.d/ddns-go
-echo ">>> [ddns-go] /etc/init.d/ddns-go 已创建并设置可执行权限"
+chmod +x files/etc/init.d/ddns_go
+echo ">>> [ddns-go] /etc/init.d/ddns_go 启动脚本已创建并设置可执行权限"
 
-# 创建 uci-defaults 脚本：首次启动时自动启用 ddns-go 服务
+# 4. 开机自启脚本（首次刷机生效）
 mkdir -p files/etc/uci-defaults
 
 cat > files/etc/uci-defaults/40-ddns-go << 'DDNSEOF'
 #!/bin/sh
-
-# 自动启用 ddns-go 服务
-if [ -x /etc/init.d/ddns-go ]; then
-    /etc/init.d/ddns-go enable
-    /etc/init.d/ddns-go start
-    logger -t ddns-go "服务已自动启用并启动"
+if [ -x /etc/init.d/ddns_go ]; then
+    /etc/init.d/ddns_go enable
+    /etc/init.d/ddns_go start
 fi
-
 exit 0
 DDNSEOF
 
 chmod +x files/etc/uci-defaults/40-ddns-go
-echo ">>> [ddns-go] uci-defaults 脚本已创建"
+echo ">>> [ddns-go] uci-defaults 开机自启脚本已创建"
 
-echo ">>> [ddns-go] 配置注入完成"
+echo ">>> [ddns-go] 终极注入完成，将编译 luci-app-ddns-go 并强制 procd 启动"
 
 
 # ════════════════════════════════════════════════════════════
