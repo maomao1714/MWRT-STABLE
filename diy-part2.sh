@@ -1028,6 +1028,14 @@ echo ">>> [ddns-go] 注入配置文件和启动脚本..."
 sed -i "/^CONFIG_PACKAGE_ddns-go=/d" .config
 echo "CONFIG_PACKAGE_ddns-go=y" >> .config
 echo ">>> [ddns-go] CONFIG_PACKAGE_ddns-go=y 已写入"
+# 强制编译 luci-app-ddns-go LuCI 界面及其官方中文语言包
+# 解决编译时 luci-app-ddns-go 因依赖不满足被跳过、导致 LuCI 界面 RPC 报错的问题
+sed -i "/^CONFIG_PACKAGE_luci-app-ddns-go=/d" .config
+echo "CONFIG_PACKAGE_luci-app-ddns-go=y" >> .config
+echo ">>> [ddns-go] CONFIG_PACKAGE_luci-app-ddns-go=y 已写入"
+sed -i "/^CONFIG_PACKAGE_luci-i18n-ddns-go-zh-cn=/d" .config
+echo "CONFIG_PACKAGE_luci-i18n-ddns-go-zh-cn=y" >> .config
+echo ">>> [ddns-go] CONFIG_PACKAGE_luci-i18n-ddns-go-zh-cn=y 已写入"
 
 # 创建 ddns-go UCI 配置文件
 cat > files/etc/config/ddns-go << 'DDNSEOF'
@@ -1649,5 +1657,5 @@ echo " APN补丁  : 移动/联通/电信/广电 自动识别"
 echo " IPTV     : msd_lite + rtp2httpd"
 echo " WiFi     : 当前 LEDE"
 echo " OpenVPN  : 当前 LEDE 原生配置"
-echo " ddns-go  : 配置文件 + 启动脚本 + 自动启用"
+echo " ddns-go  : 配置文件 + 启动脚本 + 自动启用 + LuCI界面(强制编译)"
 echo "========================================"
