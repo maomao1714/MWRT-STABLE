@@ -176,41 +176,14 @@ case "${DEVICE:-}" in
 
         mkdir -p \
             "$SONGLOFT_PKG_DIR/files" \
-            "$SONGLOFT_PKG_DIR/files/usr/bin" \
-            "$SONGLOFT_PKG_DIR/files/etc/init.d" \
-            "$SONGLOFT_PKG_DIR/files/etc/config"
+            "$SONGLOFT_PKG_DIR/files/usr/bin"
 
         # ─────────────────────────────────────
-        # 保留作者官方 init/config
-        #
-        # 这样 LuCI 和启动逻辑仍然沿用作者方案。
+        # init/config 由 luci-app-songloft 的
+        # root/etc/ 目录自动安装，
+        # package/songloft 只负责安装二进制。
         # ─────────────────────────────────────
 
-        if [ -f "$SONGLOFT_ROUTER_DIR/openwrt/songloft/files/songloft.init" ]; then
-
-            cp \
-                "$SONGLOFT_ROUTER_DIR/openwrt/songloft/files/songloft.init" \
-                "$SONGLOFT_PKG_DIR/files/etc/init.d/songloft"
-
-        else
-
-            echo "[ERROR] 找不到官方 songloft.init"
-            exit 1
-
-        fi
-
-        if [ -f "$SONGLOFT_ROUTER_DIR/openwrt/songloft/files/songloft.config" ]; then
-
-            cp \
-                "$SONGLOFT_ROUTER_DIR/openwrt/songloft/files/songloft.config" \
-                "$SONGLOFT_PKG_DIR/files/etc/config/songloft"
-
-        else
-
-            echo "[ERROR] 找不到官方 songloft.config"
-            exit 1
-
-        fi
 
         # ─────────────────────────────────────
         # 下载官方最新 ARM64 完整版
@@ -364,10 +337,6 @@ define Package/songloft/description
   Songloft official prebuilt ARM64 binary.
 endef
 
-define Package/songloft/conffiles
-/etc/config/songloft
-endef
-
 define Build/Prepare
 endef
 
@@ -380,12 +349,6 @@ endef
 define Package/songloft/install
 	$(INSTALL_DIR) $(1)/usr/bin
 	$(INSTALL_BIN) ./files/usr/bin/songloft $(1)/usr/bin/songloft
-
-	$(INSTALL_DIR) $(1)/etc/init.d
-	$(INSTALL_BIN) ./files/etc/init.d/songloft $(1)/etc/init.d/songloft
-
-	$(INSTALL_DIR) $(1)/etc/config
-	$(INSTALL_CONF) ./files/etc/config/songloft $(1)/etc/config/songloft
 endef
 
 $(eval $(call BuildPackage,songloft))
@@ -450,16 +413,6 @@ if [ "${DEVICE:-}" = "wh3000" ] || \
         exit 1
     fi
 
-    if [ ! -f "package/songloft/files/etc/init.d/songloft" ]; then
-        echo "[ERROR] songloft.init 不存在"
-        exit 1
-    fi
-
-    if [ ! -f "package/songloft/files/etc/config/songloft" ]; then
-        echo "[ERROR] songloft.config 不存在"
-        exit 1
-    fi
-
     if [ ! -d "package/luci-app-songloft" ]; then
         echo "[ERROR] luci-app-songloft 不存在"
         exit 1
@@ -467,9 +420,7 @@ if [ "${DEVICE:-}" = "wh3000" ] || \
 
     echo "  ✓ songloft Makefile"
     echo "  ✓ 官方 ARM64 二进制"
-    echo "  ✓ songloft init"
-    echo "  ✓ songloft config"
-    echo "  ✓ luci-app-songloft"
+    echo "  ✓ luci-app-songloft（含 init/config）"
 
     echo ""
     echo ">>> SongLoft 已切换为官方最新 ARM64 二进制模式"
