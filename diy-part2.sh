@@ -260,6 +260,48 @@ echo ">>> [3] Lucky 权限修复完成"
 echo ">>> [3.5] SongLoft init 由 luci-app-songloft 提供，跳过自定义覆盖"
 
 
+# ════════════════════════════════════════════════════════════
+# SongLoft 默认数据目录
+# 新版 init 用 db_path 作工作目录，音乐目录固定为 $db_path/music
+# 设置 db_path=/mnt/sda1 → 音乐目录=/mnt/sda1/music（与旧版一致）
+# ════════════════════════════════════════════════════════════
+
+echo ">>> [3.5b] 写入 SongLoft 默认数据目录..."
+
+SONGLOFT_UCI="package/luci-app-songloft/root/etc/config/songloft"
+
+if [ -f "$SONGLOFT_UCI" ]; then
+
+    # 将 db_path 默认值改为 /mnt/sda1
+    sed -i \
+        "s|option db_path ''|option db_path '/mnt/sda1'|g" \
+        "$SONGLOFT_UCI"
+
+    # 移除旧版 web_path 残留（如有）
+    sed -i \
+        "/option web_path/d" \
+        "$SONGLOFT_UCI"
+
+    # 写入 music_dir 默认值（供 LuCI 界面读取）
+    if ! grep -q 'option music_dir' "$SONGLOFT_UCI"; then
+        printf "\toption music_dir '/mnt/sda1/music'\n" \
+            >> "$SONGLOFT_UCI"
+    fi
+
+    echo "  ✓ db_path 默认值已设为 /mnt/sda1"
+    echo "  ✓ music_dir 默认值已设为 /mnt/sda1/music"
+    echo "  内容："
+    cat "$SONGLOFT_UCI"
+
+else
+
+    echo "[WARN] 找不到 $SONGLOFT_UCI，跳过默认 db_path 写入"
+
+fi
+
+echo ">>> [3.5b] 完成"
+
+
 
 # ════════════════════════════════════════════════════════════
 # SongLoft LuCI 增强
@@ -343,29 +385,60 @@ o.datatype = "port"
 o.default = "58091"
 
 
-o = s:option(
-    Value,
-    "db_path",
-    translate("数据目录")
-)
-
-o.default = "/etc/songloft/data"
-
-o.description =
-    translate("SongLoft 的工作目录，用于存放数据库及音乐索引")
-
-
+-- ── 音乐库目录（主要用户入口）────────────────────────
+-- 用户填写此项；on_write 自动把上级目录写入 db_path。
 o = s:option(
     Value,
     "music_dir",
-    translate("音乐库目录（绝对路径）")
+    translate("音乐库目录")
 )
 
 o.default = "/mnt/sda1/music"
 o.rmempty = false
 
-o.description =
-    translate("例如 /mnt/sda1/music，确保路径存在且可读")
+o.description = translate(
+    "音乐文件所在目录，例如 /mnt/sda1/music。" ..
+    "保存后自动推导数据目录，无需手动填写。"
+)
+
+function o.cfgvalue(self, section)
+    local v = m.uci:get("songloft", section, "music_dir")
+    if not v or v == "" then
+        local db = m.uci:get("songloft", section, "db_path") or "/mnt/sda1"
+        v = db .. "/music"
+    end
+    return v
+end
+
+function o.write(self, section, value)
+    value = value:gsub("/$", "")
+    m.uci:set("songloft", section, "music_dir", value)
+    local db_path = value:match("^(.+)/[^/]+$") or "/mnt/sda1"
+    m.uci:set("songloft", section, "db_path", db_path)
+end
+
+
+-- ── 数据目录（只读，自动推导）─────────────────────────
+o = s:option(
+    DummyValue,
+    "_db_path_display",
+    translate("数据目录")
+)
+
+o.rawhtml = true
+
+function o.cfgvalue(self, section)
+    local db = m.uci:get("songloft", section, "db_path") or ""
+    if db ~= "" then
+        return "<code>" .. db .. "</code>"
+    else
+        return "<em>" .. translate("将在保存后自动推导") .. "</em>"
+    end
+end
+
+o.description = translate(
+    "由音乐库目录自动推导（取其上级目录），无需手动修改。"
+)
 
 
 o = s:option(
@@ -403,16 +476,6 @@ o = s:option(
 )
 
 o.default = "/usr/bin/songloft"
-o.rmempty = true
-
-
-o = s:option(
-    Value,
-    "web_path",
-    translate("Web 界面目录")
-)
-
-o.default = "/usr/share/songloft/web-embedded"
 o.rmempty = true
 
 
@@ -510,23 +573,60 @@ o.datatype = "port"
 o.default = "58091"
 
 
-o = s:option(
-    Value,
-    "db_path",
-    translate("数据目录")
-)
-
-o.default = "/etc/songloft/data"
-
-
+-- ── 音乐库目录（主要用户入口）────────────────────────
+-- 用户填写此项；on_write 自动把上级目录写入 db_path。
 o = s:option(
     Value,
     "music_dir",
-    translate("音乐库目录（绝对路径）")
+    translate("音乐库目录")
 )
 
 o.default = "/mnt/sda1/music"
 o.rmempty = false
+
+o.description = translate(
+    "音乐文件所在目录，例如 /mnt/sda1/music。" ..
+    "保存后自动推导数据目录，无需手动填写。"
+)
+
+function o.cfgvalue(self, section)
+    local v = m.uci:get("songloft", section, "music_dir")
+    if not v or v == "" then
+        local db = m.uci:get("songloft", section, "db_path") or "/mnt/sda1"
+        v = db .. "/music"
+    end
+    return v
+end
+
+function o.write(self, section, value)
+    value = value:gsub("/$", "")
+    m.uci:set("songloft", section, "music_dir", value)
+    local db_path = value:match("^(.+)/[^/]+$") or "/mnt/sda1"
+    m.uci:set("songloft", section, "db_path", db_path)
+end
+
+
+-- ── 数据目录（只读，自动推导）─────────────────────────
+o = s:option(
+    DummyValue,
+    "_db_path_display",
+    translate("数据目录")
+)
+
+o.rawhtml = true
+
+function o.cfgvalue(self, section)
+    local db = m.uci:get("songloft", section, "db_path") or ""
+    if db ~= "" then
+        return "<code>" .. db .. "</code>"
+    else
+        return "<em>" .. translate("将在保存后自动推导") .. "</em>"
+    end
+end
+
+o.description = translate(
+    "由音乐库目录自动推导（取其上级目录），无需手动修改。"
+)
 
 
 o = s:option(
@@ -564,16 +664,6 @@ o = s:option(
 )
 
 o.default = "/usr/bin/songloft"
-o.rmempty = true
-
-
-o = s:option(
-    Value,
-    "web_path",
-    translate("Web 界面目录")
-)
-
-o.default = "/usr/share/songloft/web-embedded"
 o.rmempty = true
 
 
