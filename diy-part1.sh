@@ -202,42 +202,131 @@ case "${DEVICE:-}" in
 
         echo ">>> 下载官方最新 SongLoft ARM64..."
 
-        if command -v curl >/dev/null 2>&1; then
+        # ─────────────────────────────────────
+        # 带多轮重试的下载器
+        #
+        # 背景：
+        #   GitHub Releases 资产会 302 跳转到
+        #   objects.githubusercontent.com，
+        #   在大文件刚下载完成后，紧接着的第二个
+        #   连接偶发被重置，curl 报：
+        #     (56) Connection died, tried 5 times
+        #
+        #   旧实现的 --retry 默认不覆盖 exit 56，
+        #   因此小文件（checksums.txt）一旦断连
+        #   就直接判死，整个 DIY1 失败。
+        #
+        # 现在的策略：
+        #   1. --retry-all-errors 让 curl 也重试 56
+        #   2. --http1.1 规避 HTTP/2 连接复用崩溃
+        #   3. bash 层再套 5 轮，每轮间隔 10 秒
+        #   4. curl 不可用时自动回退 wget
+        # ─────────────────────────────────────
+        songloft_fetch() {
 
-            curl -fL \
-                --retry 5 \
-                --retry-delay 3 \
-                --connect-timeout 20 \
-                --max-time 300 \
-                "$SONGLOFT_BIN_URL" \
-                -o "$SONGLOFT_BIN"
+            local url="$1"
+            local out="$2"
+            local max_time="${3:-300}"
+            local round
 
-            curl -fL \
-                --retry 5 \
-                --retry-delay 3 \
-                --connect-timeout 20 \
-                --max-time 120 \
-                "$SONGLOFT_CHECKSUM_URL" \
-                -o "$SONGLOFT_CHECKSUMS"
+            for round in 1 2 3 4 5; do
 
-        elif command -v wget >/dev/null 2>&1; then
+                rm -f "$out"
 
-            wget \
-                --tries=5 \
-                --timeout=30 \
-                -O "$SONGLOFT_BIN" \
-                "$SONGLOFT_BIN_URL"
+                if command -v curl >/dev/null 2>&1; then
 
-            wget \
-                --tries=5 \
-                --timeout=30 \
-                -O "$SONGLOFT_CHECKSUMS" \
-                "$SONGLOFT_CHECKSUM_URL"
+                    if curl -fL \
+                        --http1.1 \
+                        --retry 3 \
+                        --retry-all-errors \
+                        --retry-delay 2 \
+                        --connect-timeout 20 \
+                        --max-time "$max_time" \
+                        "$url" \
+                        -o "$out"; then
 
-        else
+                        echo ">>> 下载成功（第 ${round} 轮）：$url"
+                        return 0
 
-            echo "[ERROR] 系统没有 curl 或 wget"
+                    fi
+
+                elif command -v wget >/dev/null 2>&1; then
+
+                    if wget \
+                        --tries=5 \
+                        --timeout=30 \
+                        -O "$out" \
+                        "$url"; then
+
+                        echo ">>> 下载成功（第 ${round} 轮）：$url"
+                        return 0
+
+                    fi
+
+                else
+
+                    echo "[ERROR] 系统没有 curl 或 wget"
+                    return 1
+
+                fi
+
+                echo "[WARN] 第 ${round} 轮下载失败，10 秒后重试：$url"
+                sleep 10
+
+            done
+
+            echo "[ERROR] 已重试 5 轮仍失败：$url"
+            return 1
+
+        }
+
+        if ! songloft_fetch "$SONGLOFT_BIN_URL" "$SONGLOFT_BIN" 300; then
+
+            echo "[ERROR] SongLoft ARM64 二进制下载失败"
             exit 1
+
+        fi
+
+        # ─────────────────────────────────────
+        # checksums.txt 拿不到时的兜底
+        #
+        # GitHub Releases API 会返回每个资产的
+        # sha256 digest，可当作官方校验值使用。
+        # ─────────────────────────────────────
+        if ! songloft_fetch "$SONGLOFT_CHECKSUM_URL" "$SONGLOFT_CHECKSUMS" 120; then
+
+            echo "[WARN] checksums.txt 下载失败，改用 GitHub API digest 兜底..."
+
+            SONGLOFT_API_DIGEST="$(
+                curl -fsSL \
+                    --http1.1 \
+                    --retry 3 \
+                    --retry-all-errors \
+                    --retry-delay 2 \
+                    --connect-timeout 20 \
+                    --max-time 60 \
+                    "https://api.github.com/repos/songloft-org/songloft/releases/latest" \
+                | python3 -c '
+import json, sys
+data = json.load(sys.stdin)
+for asset in data.get("assets", []):
+    if asset.get("name") == "songloft-linux-arm64":
+        print((asset.get("digest") or "").replace("sha256:", ""))
+        break
+' 2>/dev/null || true
+            )"
+
+            if printf '%s' "$SONGLOFT_API_DIGEST" | grep -Eq '^[0-9a-f]{64}$'; then
+
+                echo ">>> 使用 API digest 作为校验值：$SONGLOFT_API_DIGEST"
+                printf '%s  songloft-linux-arm64\n' "$SONGLOFT_API_DIGEST" > "$SONGLOFT_CHECKSUMS"
+
+            else
+
+                echo "[ERROR] checksums.txt 与 GitHub API digest 均不可用，无法校验"
+                exit 1
+
+            fi
 
         fi
 
