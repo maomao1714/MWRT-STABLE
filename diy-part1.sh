@@ -686,19 +686,81 @@ echo ">>> 跳过历史 Linux 6.18 WED patch 清理"
 echo ">>> 使用 LEDE 当前 target/kernel 组合"
 
 # ─────────────────────────────────────────────
-# 不再强制修改 QMI WWAN 驱动源码
+# QMI WWAN 驱动 6.18 兼容修复（定向，最小改动）
 #
-# 原来的 Fix-3 已取消。
+# 背景：
+#   LEDE 自带的 package/wwan/driver/quectel_QMI_WWAN
+#   （qmi_wwan_q 1.2.9）仍在调用 hrtimer_init()。
+#   Linux 6.18 已移除该 API，编译报：
+#     error: implicit declaration of function 'hrtimer_init'
 #
-# 原因：
-# 不能因为旧的 6.17/6.18 编译错误，
-# 永久修改当前 LEDE / QModem WWAN 驱动源码。
+#   QModem feed 里虽然有已修好的新版，但 feeds install
+#   会提示 "Not overriding core package"，实际编译的仍是
+#   LEDE 内置这份，所以必须在源码上定点修复。
 #
-# 当前内核由 LEDE 自己选择。
-# 如果真正出现 QMI 编译错误，再针对实际错误修复。
+# 修法与上游 QModem 一致：
+#   6.17+ 用 hrtimer_setup()，更老内核保留原写法。
+#   已打过补丁则跳过；找不到目标行会明确报错。
 # ─────────────────────────────────────────────
 
-echo ">>> 跳过历史 QMI WWAN 源码兼容补丁"
+echo ""
+echo ">>> 检查 QMI WWAN 驱动与 6.18 内核的兼容性"
+
+QMI_SRC="package/wwan/driver/quectel_QMI_WWAN/src/qmi_wwan_q.c"
+
+if [ ! -f "$QMI_SRC" ]; then
+
+    echo ">>> [WARN] 未找到 $QMI_SRC，跳过 QMI 驱动兼容修复"
+
+elif grep -q "hrtimer_setup(&priv->agg_hrtimer" "$QMI_SRC"; then
+
+    echo ">>> QMI 驱动已兼容 6.18，无需修改"
+
+else
+
+    python3 - "$QMI_SRC" <<'PYEOF'
+import re
+import sys
+
+path = sys.argv[1]
+
+with open(path, "r", encoding="utf-8", newline="") as f:
+    src = f.read()
+
+if "hrtimer_setup(&priv->agg_hrtimer" in src:
+    print(">>> QMI 驱动已兼容 6.18，无需修改")
+    sys.exit(0)
+
+pattern = re.compile(
+    r"([ \t]*)hrtimer_init\(&priv->agg_hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL\);\n"
+    r"[ \t]*priv->agg_hrtimer\.function = rmnet_usb_tx_agg_timer_cb;"
+)
+
+replacement = (
+    "#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,17,0)\n"
+    "{indent}hrtimer_setup(&priv->agg_hrtimer, rmnet_usb_tx_agg_timer_cb, CLOCK_MONOTONIC, HRTIMER_MODE_REL);\n"
+    "#else\n"
+    "{indent}hrtimer_init(&priv->agg_hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);\n"
+    "{indent}priv->agg_hrtimer.function = rmnet_usb_tx_agg_timer_cb;\n"
+    "#endif"
+)
+
+def _patch(match):
+    return replacement.format(indent=match.group(1))
+
+src, n = pattern.subn(_patch, src, count=1)
+
+if n != 1:
+    sys.stderr.write("QMI: 未找到 hrtimer_init 目标语句，源码可能已变化\n")
+    sys.exit(1)
+
+with open(path, "w", encoding="utf-8", newline="") as f:
+    f.write(src)
+
+print(">>> QMI 驱动已按 6.17+ 规则修复 hrtimer 初始化")
+PYEOF
+
+fi
 
 # ─────────────────────────────────────────────
 # 不再修改 crypto.mk
