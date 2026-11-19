@@ -1597,3 +1597,76 @@ echo " WiFi     : 当前 LEDE"
 echo " OpenVPN  : 当前 LEDE 原生配置"
 echo " ddns-go  : 配置文件 + 启动脚本 + 自动启用 + LuCI界面(强制编译)"
 echo "========================================"
+
+
+# ════════════════════════════════════════════════════════════
+# json_overview_image_info.py 容错补丁
+#
+# 上游 LEDE 脚本 scripts/json_overview_image_info.py 把 make 查询
+# DEFAULT_PACKAGES / ARCH_PACKAGES 的标准输出严格解包为 2 行，
+# 完整构建时输出多于 2 行会报 ValueError，导致最后一步生成
+# profiles.json 失败（固件本体其实已经编完）。
+# 补丁改为取最后两行非空行，不改变任何软件包/插件功能。
+# ════════════════════════════════════════════════════════════
+
+echo ">>> [json_overview] 给 json_overview_image_info.py 打容错补丁..."
+
+_JSON_OVERVIEW="scripts/json_overview_image_info.py"
+
+if [ ! -f "$_JSON_OVERVIEW" ]; then
+    echo ">>> [WARN] 未找到 $_JSON_OVERVIEW，跳过容错补丁"
+elif ! command -v python3 >/dev/null 2>&1; then
+    echo ">>> [WARN] python3 不可用，跳过容错补丁"
+elif grep -q "MWRT容错" "$_JSON_OVERVIEW"; then
+    echo ">>> [SKIP] 已包含容错补丁"
+else
+    cat > /tmp/patch_json_overview.py << 'PYEOF'
+import re
+import sys
+
+path = sys.argv[1] if len(sys.argv) > 1 else "scripts/json_overview_image_info.py"
+
+try:
+    with open(path, "r") as f:
+        content = f.read()
+except FileNotFoundError:
+    print("WARN: not found: %s, skip patch" % path)
+    sys.exit(0)
+
+if "MWRT容错" in content:
+    print("SKIP: patch already applied")
+    sys.exit(0)
+
+pattern = re.compile(
+    r'    default_packages, output\["arch_packages"\] = run\((?P<args>.*?)\)\.stdout\.splitlines\(\)',
+    re.DOTALL,
+)
+
+m = pattern.search(content)
+if not m:
+    print("WARN: target code not matched in %s, upstream may have changed, skip patch" % path)
+    sys.exit(0)
+
+new_block = (
+    "    _val_stdout = run(" + m.group("args") + ").stdout\n"
+    "    # MWRT容错：make 输出可能多于 2 行，取最后两行非空行，避免 ValueError\n"
+    "    _val_lines = [line for line in _val_stdout.splitlines() if line.strip()]\n"
+    "    default_packages, output[\"arch_packages\"] = _val_lines[-2:]"
+)
+
+content = pattern.sub(lambda _: new_block, content, count=1)
+
+with open(path, "w") as f:
+    f.write(content)
+
+print("Patch OK: %s" % path)
+PYEOF
+    if python3 /tmp/patch_json_overview.py "$_JSON_OVERVIEW"; then
+        echo ">>> [OK] json_overview 容错补丁成功"
+    else
+        echo ">>> [WARN] json_overview 容错补丁未应用，脚本继续执行"
+    fi
+    rm -f /tmp/patch_json_overview.py
+fi
+
+echo ">>> [json_overview] 容错补丁段完成"
