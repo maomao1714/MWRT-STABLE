@@ -1022,7 +1022,12 @@ jobs:
           # 并行编译时 dwarves 会在 host cmake 尚未安装完成时调用 cmake，
           # 报错 "Could not find CMAKE_ROOT"，导致整个 tools 编译失败。
           # 先串行装好 host cmake，再并行编译，即可规避该竞态。
-          make tools/cmake/install -j1 V=s
+          # 注意：不能用 make tools/cmake/install —— 本 LEDE 快照的
+          # rules.mk 里 DEFAULT_SUBDIR_TARGETS 没有 install，
+          # 单个 host 工具没有 install 目标（wh3000pro #58 因此报错
+          # No rule to make target 'tools/cmake/install'）。
+          # tools/<工具>/compile 就会把 host 工具装进 staging_dir/host。
+          make tools/cmake/compile -j1 V=s
 
           echo "✅ host cmake 预装完成"
 
