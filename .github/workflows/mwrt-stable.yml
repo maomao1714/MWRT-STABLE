@@ -1009,6 +1009,23 @@ jobs:
 
           echo "✅ 源码包下载完成"
 
+      - name: "🧰 预装 host cmake（规避 dwarves 并行竞态）"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          cd "${LEDE_DIR}"
+
+          # 根因（2026-11-19 wh3000pro #57）：
+          # 上游 LEDE tools/Makefile 只给 dwarves 声明了 elfutils 依赖，
+          # 没有声明 cmake 依赖；而 dwarves 用 cmake 配置。
+          # 并行编译时 dwarves 会在 host cmake 尚未安装完成时调用 cmake，
+          # 报错 "Could not find CMAKE_ROOT"，导致整个 tools 编译失败。
+          # 先串行装好 host cmake，再并行编译，即可规避该竞态。
+          make tools/cmake/install -j1 V=s
+
+          echo "✅ host cmake 预装完成"
+
       - name: "🏗️ 编译固件"
         shell: bash
         env:
